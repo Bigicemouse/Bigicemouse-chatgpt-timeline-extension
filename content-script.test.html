@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Timeline Content Script Tests</title>
+</head>
+<body>
+  <pre id="output">RUNNING</pre>
+  <script src="./src/core/utils.js"></script>
+  <script src="./src/core/state.js"></script>
+  <script src="./src/data/auth.js"></script>
+  <script src="./src/data/conversation-api.js"></script>
+  <script src="./src/data/dom-collector.js"></script>
+  <script src="./src/ui/geometry.js"></script>
+  <script src="./src/navigation/locator.js"></script>
+  <script src="./src/ui/styles.js"></script>
+  <script src="./src/ui/layout.js"></script>
+  <script src="./src/ui/timeline.js"></script>
+  <script src="./src/features/export.js"></script>
+  <script src="./src/content-main.js"></script>
+  <script>
+    (function() {
+      function write(message) {
+        document.getElementById('output').textContent = message;
+      }
+      function assertEqual(actual, expected, message) {
+        if (actual !== expected) throw new Error(message + '\nExpected: ' + expected + '\nActual: ' + actual);
+      }
+      function assertMatch(actual, pattern, message) {
+        if (!pattern.test(actual)) throw new Error(message + '\nPattern: ' + pattern + '\nActual: ' + actual);
+      }
+      function fakeTurnElement(testId, role, text) {
+        var roleSelector = '[data-message-author-role="' + (role === 'u' ? 'user' : 'assistant') + '"]';
+        return {
+          textContent: text,
+          parentElement: null,
+          getAttribute: function(name) { return name === 'data-testid' ? testId : null; },
+          querySelector: function(selector) {
+            return selector.indexOf(roleSelector) !== -1 || selector === '.whitespace-pre-wrap' || selector === '.markdown' || selector === '.prose'
+              ? { textContent: text }
+              : null;
+          }
+        };
+      }
+
+      setTimeout(async function() {
+        try {
+          var api = window.__TL_TEST_API__;
+          assertEqual(api.isConversationPage('https://chatgpt.com/'), false, 'home page should not initialize timeline');
+          assertEqual(api.isConversationPage('https://chatgpt.com/g/g-abc'), false, 'GPT page should not initialize timeline');
+          assertEqual(api.isConversationPage('https://chatgpt.com/c/chat-123'), true, 'conversation page should initialize timeline');
+          assertEqual(api.shouldInitializeConversation('https://chatgpt.com/g/g-abc', true), true, 'rendered conversation turns should initialize timeline even without a /c URL');
+          assertEqual(api.shouldInitializeConversation('https://chatgpt.com/', false), false, 'home page without conversation turns should stay hidden');
+          assertEqual(api.getConversationIdFromUrl('https://chatgpt.com/c/chat-123?model=x'), 'chat-123', 'conversation id should parse from URL');
+          assertEqual(api.getDefaultPrefs().mode, 'collapsed', 'default UI mode should be collapsed');
+          assertEqual(typeof api.formatConversationMarkdown, 'function', 'Markdown export formatter should stay available');
+          assertEqual(typeof api.formatConversationJson, 'function', 'JSON export formatter should stay available');
+          assertEqual(api.buildExportFilename('Pointer Notes', 'json'), 'pointer-notes.json', 'JSON export filename should keep json extension');
+          assertEqual(api.buildExportFilename('Pointer Notes', 'pdf'), 'pointer-notes.md', 'unsupported export formats should fall back to markdown');
+          assertEqual(typeof api.formatConversationPrintHtml, 'undefined', 'PDF print formatter should not be exposed');
+
+          assertEqual(api.normalizeText('  DMA\n timeout \t protection  '), 'DMA timeout protection', 'normalizeText should collapse whitespace');
+
+          var conversationData = {
+            current_node: 'a2',
+            mapping: {
+              root: { id: 'root', parent: null, children: ['u1'], message: null },
+              u1: { id: 'u1', parent: 'root', children: ['a1'], message: { id: 'msg-u1', author: { role: 'user' }, content: { parts: ['First GPIO question'] } } },
+              a1: { id: 'a1', parent: 'u1', children: ['u2'], message: { id: 'msg-a1', author: { role: 'assistant' }, content: { parts: ['First GPIO answer'] } } },
+              u2: { id: 'u2', parent: 'a1', children: ['a2'], message: { id: 'msg-u2', author: { role: 'user' }, content: { parts: [{ text: 'Second USART question' }] } } },
+              a2: { id: 'a2', parent: 'u2', children: [], message: { id: 'msg-a2', author: { role: 'assistant' }, content: { parts: ['Second USART answer'] } } }
+            }
+          };
+          var apiTurns = api.collectTurnsFromConversationData(conversationData);
+          assertEqual(apiTurns.length, 4, 'conversation JSON should produce every selected-path turn without scrolling');
+          assertEqual(apiTurns[0].id, 'msg-u1', 'conversation JSON should keep stable message ids');
+          assertEqual(apiTurns[0].role, 'u', 'conversation JSON should preserve user role');
+          assertEqual(apiTurns[2].text, 'Second USART question', 'conversation JSON should read multimodal text parts');
+
+          var fullConversationData = {
+            current_node: 'a1',
+            mapping: {
+              a2: { id: 'a2', parent: 'u2', children: [], message: { id: 'msg-full-a2', create_time: 40, author: { role: 'assistant' }, content: { parts: ['Second full answer'] } } },
+              root: { id: 'root', parent: null, children: ['u1'], message: null },
+              u2: { id: 'u2', parent: 'a1', children: ['a2'], message: { id: 'msg-full-u2', create_time: 30, author: { role: 'user' }, content: { parts: ['Second full question'] } } },
+              a1: { id: 'a1', parent: 'u1', children: ['u2'], message: { id: 'msg-full-a1', create_time: 20, author: { role: 'assistant' }, content: { parts: ['First full answer'] } } },
+              u1: { id: 'u1', parent: 'root', children: ['a1'], message: { id: 'msg-full-u1', create_time: 10, author: { role: 'user' }, content: { parts: ['First full question'] } } }
+            }
+          };
+          var fullApiTurns = api.collectTurnsFromConversationData(fullConversationData);
+          assertEqual(fullApiTurns.length, 4, 'conversation JSON should fall back to every readable mapping turn when selected path is incomplete');
+          assertEqual(fullApiTurns[0].text, 'First full question', 'fallback mapping turns should be sorted in conversation order');
+          assertEqual(fullApiTurns[3].text, 'Second full answer', 'fallback mapping turns should include later off-path messages');
+          assertEqual(fullApiTurns[0].sortIndex < fullApiTurns[3].sortIndex, true, 'fallback mapping turns should use ascending sort indexes');
+          var fullApiResult = api.collectTurnsWithMetadata(fullConversationData);
+          assertEqual(fullApiResult.turns.length, 4, 'metadata API should return the same readable turns as the compatibility API');
+          assertEqual(fullApiResult.metadata.usedFallback, true, 'metadata API should record when selected path was incomplete');
+          assertEqual(fullApiResult.metadata.reason, 'selected-path-incomplete', 'metadata API should explain why mapping fallback was used');
+
+          var groups = api.buildQaGroups(apiTurns);
+          assertEqual(groups.length, 2, 'conversation JSON turns should build question groups');
+          assertEqual(groups[0].summary, 'First GPIO question', 'question groups should keep chronological order');
+          assertEqual(groups[1].summary, 'Second USART question', 'latest question group should stay below earlier groups');
+          var rail = api.buildRailTimelineItems(groups, groups[1].id, 1);
+          assertEqual(rail.items.length, 2, 'rail should expose every group even when maxItems is small');
+          assertEqual(rail.items[0].title, 'First GPIO question', 'rail items should render earliest group first');
+          assertEqual(rail.items[1].title, 'Second USART question', 'rail items should render latest group last');
+          assertEqual(rail.beforeHidden, false, 'rail should not hide earlier groups');
+          assertEqual(rail.afterHidden, false, 'rail should not hide later groups');
+
+          var longConversationData = {
+            current_node: 'long-a-14',
+            mapping: { root: { id: 'root', parent: null, children: ['long-u-0'], message: null } }
+          };
+          var previousLongNodeId = 'root';
+          for (var longIndex = 0; longIndex < 15; longIndex += 1) {
+            var userNodeId = 'long-u-' + longIndex;
+            var assistantNodeId = 'long-a-' + longIndex;
+            longConversationData.mapping[previousLongNodeId].children = [userNodeId];
+            longConversationData.mapping[userNodeId] = {
+              id: userNodeId,
+              parent: previousLongNodeId,
+              children: [assistantNodeId],
+              message: { id: 'msg-' + userNodeId, create_time: longIndex * 2 + 1, author: { role: 'user' }, content: { parts: ['Long question ' + longIndex] } }
+            };
+            longConversationData.mapping[assistantNodeId] = {
+              id: assistantNodeId,
+              parent: userNodeId,
+              children: [],
+              message: { id: 'msg-' + assistantNodeId, create_time: longIndex * 2 + 2, author: { role: 'assistant' }, content: { parts: ['Long answer ' + longIndex] } }
+            };
+            previousLongNodeId = assistantNodeId;
+          }
+          var longTurns = api.collectTurnsFromConversationData(longConversationData);
+          assertEqual(longTurns.length, 30, 'complete API mapping should provide every long conversation turn without DOM scrolling');
+          assertEqual(api.buildQaGroups(longTurns).length, 15, 'complete API mapping should build one group per long question');
+
+          var structuredConversationData = {
+            current_node: 'final-tool-answer',
+            mapping: {
+              root: { id: 'root', parent: null, children: ['structured-user-1'], message: null },
+              'structured-user-1': {
+                id: 'structured-user-1',
+                parent: 'root',
+                children: ['intermediate-tool-answer'],
+                message: {
+                  id: 'msg-structured-user-1',
+                  create_time: 1,
+                  author: { role: 'user' },
+                  content: {
+                    parts: [
+                      { parts: ['Nested ', { text: 'question' }] },
+                      { content_type: 'image_asset_pointer', width: 640, height: 480, metadata: { dalle: { prompt: 'scope diagram' } } }
+                    ]
+                  }
+                }
+              },
+              'intermediate-tool-answer': {
+                id: 'intermediate-tool-answer',
+                parent: 'structured-user-1',
+                children: ['structured-answer-1'],
+                message: {
+                  id: 'msg-intermediate-tool-answer',
+                  create_time: 2,
+                  author: { role: 'assistant' },
+                  content: { content_type: 'code', text: 'Intermediate tool output' }
+                }
+              },
+              'structured-answer-1': {
+                id: 'structured-answer-1',
+                parent: 'intermediate-tool-answer',
+                children: ['structured-user-2'],
+                message: {
+                  id: 'msg-structured-answer-1',
+                  create_time: 3,
+                  author: { role: 'assistant' },
+                  content: { parts: ['Readable final answer'] }
+                }
+              },
+              'structured-user-2': {
+                id: 'structured-user-2',
+                parent: 'structured-answer-1',
+                children: ['final-tool-answer'],
+                message: {
+                  id: 'msg-structured-user-2',
+                  create_time: 4,
+                  author: { role: 'user' },
+                  content: { parts: ['Need final artifact'] }
+                }
+              },
+              'final-tool-answer': {
+                id: 'final-tool-answer',
+                parent: 'structured-user-2',
+                children: [],
+                message: {
+                  id: 'msg-final-tool-answer',
+                  create_time: 5,
+                  author: { role: 'assistant' },
+                  content: { content_type: 'code', text: 'Final terminal output' }
+                }
+              }
+            }
+          };
+          var structuredTurns = api.collectTurnsFromConversationData(structuredConversationData);
+          assertEqual(structuredTurns.length, 4, 'parser should skip intermediate tool-like assistant nodes but keep final tool-like replies');
+          assertMatch(structuredTurns[0].text, /Nested question/, 'parser should read nested content parts');
+          assertMatch(structuredTurns[0].text, /\[Image: scope diagram \(640x480\)\]/, 'parser should summarize image asset parts');
+          assertEqual(structuredTurns[1].text, 'Readable final answer', 'parser should keep the readable assistant descendant');
+          assertEqual(structuredTurns[3].text, 'Final terminal output', 'parser should keep the final tool-like assistant reply');
+
+          var manyGroups = [];
+          for (var i = 0; i < 18; i += 1) {
+            manyGroups.push({ id: 'g' + i, index: i, summary: 'Question ' + i });
+          }
+          var collapsed = api.getCollapsedItems(manyGroups, 'g10', 7);
+          assertEqual(collapsed.length, 7, 'collapsed rail may show a compact visual window');
+          assertEqual(collapsed[3].active, true, 'collapsed rail should center the active visual node');
+          var geometryGroups = api.buildQaGroups([
+            { id: 'geo-u1', role: 'u', text: 'Geo first question', sortIndex: 1, order: 1, el: document.createElement('section') },
+            { id: 'geo-a1', role: 'a', text: 'Geo first answer', sortIndex: 2, order: 2, el: document.createElement('section') },
+            { id: 'geo-u2', role: 'u', text: 'Geo second question', sortIndex: 3, order: 3, el: document.createElement('section') },
+            { id: 'geo-a2', role: 'a', text: 'Geo second answer', sortIndex: 4, order: 4, el: document.createElement('section') },
+            { id: 'geo-u3', role: 'u', text: 'Geo third question', sortIndex: 5, order: 5, el: document.createElement('section') }
+          ]);
+          var fakeScroll = document.createElement('div');
+          fakeScroll.scrollTop = 100;
+          Object.defineProperty(fakeScroll, 'clientHeight', { value: 400, configurable: true });
+          fakeScroll.getBoundingClientRect = function() { return { top: 0, bottom: 400, height: 400, left: 0, right: 100, width: 100 }; };
+          geometryGroups[0].anchorTurn.el.getBoundingClientRect = function() { return { top: 0, bottom: 20, height: 20, left: 0, right: 100, width: 100 }; };
+          geometryGroups[1].anchorTurn.el.getBoundingClientRect = function() { return { top: 200, bottom: 220, height: 20, left: 0, right: 100, width: 100 }; };
+          geometryGroups[2].anchorTurn.el.getBoundingClientRect = function() { return { top: 600, bottom: 620, height: 20, left: 0, right: 100, width: 100 }; };
+          var geometry = api.buildTimelineGeometry(geometryGroups, geometryGroups[1].id, fakeScroll);
+          assertEqual(geometry.items.length, 3, 'timeline geometry should include every group marker');
+          assertEqual(geometry.items[0].y < geometry.items[1].y && geometry.items[1].y < geometry.items[2].y, true, 'timeline geometry should map DOM offsets to ascending marker positions');
+          assertEqual(geometry.items[1].active, true, 'timeline geometry should preserve active marker state');
+
+          var domTurns = api.collectTurnsFromSections([
+            fakeTurnElement('conversation-turn-3', 'u', 'Second USART question')
+          ]);
+          var domHost = document.createElement('main');
+          var topLevelTurn = document.createElement('section');
+          topLevelTurn.setAttribute('data-testid', 'conversation-turn-11');
+          topLevelTurn.innerHTML = '<div data-message-author-role="user"><span class="visually-hidden">Hidden label</span><span class="whitespace-pre-wrap">Visible user text</span><span class="tl-card">Injected timeline UI</span><section data-testid="conversation-turn-99"><div data-message-author-role="user">Nested duplicate</div></section></div>';
+          var fallbackTurn = document.createElement('article');
+          fallbackTurn.setAttribute('data-message-author-role', 'assistant');
+          fallbackTurn.setAttribute('data-message-id', 'fallback-message-id');
+          fallbackTurn.innerHTML = '<div class="markdown">Fallback assistant text</div>';
+          domHost.appendChild(topLevelTurn);
+          domHost.appendChild(fallbackTurn);
+          document.body.appendChild(domHost);
+          var collectedSections = api.collectTurnSections(domHost);
+          assertEqual(collectedSections.length, 2, 'DOM collector should use Voyager-style selector fallback and ignore nested turns');
+          var voyagerDomTurns = api.collectTurnsFromSections(collectedSections);
+          assertEqual(voyagerDomTurns.length, 2, 'DOM collector should turn top-level fallback sections into turns');
+          assertEqual(voyagerDomTurns[0].text, 'Visible user text', 'DOM text extraction should strip hidden text and extension UI');
+          assertEqual(voyagerDomTurns[1].apiMessageId, 'fallback-message-id', 'DOM collector should keep message ids from fallback selectors');
+          domHost.remove();
+          var attached = api.attachDomElementsToTurns(apiTurns, domTurns);
+          assertEqual(attached[0].seenInCurrentDom, false, 'API turn outside DOM should remain detached');
+          assertEqual(attached[2].seenInCurrentDom, true, 'API turn should attach to matching visible DOM turn');
+
+          var merged = api.mergeTurnsById([], attached);
+          assertEqual(merged.length, 4, 'merge should preserve every API turn');
+          assertEqual(merged[2].seenInCurrentDom, true, 'merge should preserve DOM visibility');
+
+          var fetchState = api.createState();
+          fetchState.conversationId = 'chat-123';
+          fetchState.apiTurns = [apiTurns[0]];
+          fetchState.apiRefreshAttempts = 1;
+          fetchState.lastApiFetchAt = 0;
+          assertEqual(api.shouldFetchConversation(fetchState, 5000), true, 'partial API data should not permanently block a later full conversation fetch');
+          fetchState.apiTurns = [];
+          fetchState.apiRefreshAttempts = 6;
+          assertEqual(api.shouldFetchConversation(fetchState, 5000), false, 'conversation API retries should stay bounded when the backend is unavailable');
+
+          assertEqual(typeof api.buildAuthHeaders, 'function', 'auth header builder should be exposed for API tests');
+          assertEqual(typeof api.clearAuthCache, 'function', 'auth cache clearing should be exposed for API tests');
+          assertEqual(typeof api.fetchConversationJson, 'function', 'conversation fetcher should be exposed for API tests');
+
+          var originalChrome = window.chrome;
+          var originalFetch = window.fetch;
+          var storedToken = 'test-access-token';
+          var removedAuthKeys = [];
+          window.chrome = {
+            storage: {
+              local: {
+                get: function(keys, callback) {
+                  var value = storedToken ? { accessToken: storedToken, tokenTimestamp: Date.now() } : {};
+                  if (callback) callback(value);
+                  return Promise.resolve(value);
+                },
+                remove: function(keys, callback) {
+                  removedAuthKeys = Array.isArray(keys) ? keys.slice() : [keys];
+                  storedToken = '';
+                  if (callback) callback();
+                  return Promise.resolve();
+                }
+              }
+            }
+          };
+          api.clearAuthCache();
+          var authHeaders = await api.buildAuthHeaders();
+          assertEqual(authHeaders.authorization, 'Bearer test-access-token', 'auth headers should include stored bearer token');
+
+          var fetchCalls = [];
+          storedToken = 'test-access-token';
+          api.clearAuthCache();
+          window.fetch = function(url, options) {
+            fetchCalls.push({ url: url, options: options });
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: function() { return Promise.resolve(conversationData); }
+            });
+          };
+          await api.fetchConversationJson('chat-fetch');
+          assertMatch(fetchCalls[0].url, /\/backend-api\/conversation\/chat-fetch$/, 'conversation fetch should use backend conversation endpoint first');
+          assertEqual(fetchCalls[0].options.headers.authorization, 'Bearer test-access-token', 'conversation fetch should send auth headers');
+
+          var retryCalls = 0;
+          storedToken = 'retry-token';
+          removedAuthKeys = [];
+          api.clearAuthCache();
+          window.fetch = function(url, options) {
+            retryCalls += 1;
+            if (retryCalls === 1) {
+              return Promise.resolve({
+                ok: false,
+                status: 401,
+                json: function() { return Promise.resolve({ detail: 'expired' }); },
+                text: function() { return Promise.resolve('expired'); }
+              });
+            }
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: function() { return Promise.resolve(conversationData); }
+            });
+          };
+          await api.fetchConversationJson('chat-retry');
+          assertEqual(retryCalls, 2, 'conversation fetch should retry once after clearing auth cache on 401');
+          assertEqual(removedAuthKeys.indexOf('accessToken') >= 0, true, '401 handling should clear stored access token');
+          window.fetch = originalFetch;
+          window.chrome = originalChrome;
+
+          var routeState = api.createState();
+          api.resetConversation(routeState, 'chat-old');
+          var oldRouteToken = routeState.routeToken;
+          api.resetConversation(routeState, 'chat-new');
+          assertEqual(api.isRouteCurrent(routeState, oldRouteToken, 'chat-old'), false, 'old route token should not be current after switching conversations');
+          assertEqual(api.isRouteCurrent(routeState, routeState.routeToken, 'chat-new'), true, 'latest route token should belong to the current conversation');
+
+          var cachedTurns = api.cacheDomTurns([], domTurns);
+          var expandedCache = api.cacheDomTurns(cachedTurns, api.collectTurnsFromSections([
+            fakeTurnElement('conversation-turn-4', 'a', 'Second USART answer')
+          ]));
+          assertEqual(expandedCache.length, 2, 'passive DOM cache should preserve turns collected from visible DOM updates');
+          assertEqual(expandedCache[0].seenInCurrentDom, false, 'cached DOM turns should be detached until visible again');
+          assertEqual(typeof api.restoreScanScroll, 'undefined', 'timeline refresh should not expose active page-scanning scroll helpers');
+
+          var layoutState = api.createState();
+          layoutState.initialized = true;
+          layoutState.prefs.mode = 'collapsed';
+          layoutState.ui.timelineOpen = false;
+          var wideMain = document.createElement('main');
+          var wideTarget = document.createElement('div');
+          wideTarget.className = 'max-w-3xl';
+          wideMain.appendChild(wideTarget);
+          document.body.appendChild(wideMain);
+          api.applyLayout(layoutState);
+          assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'initialized conversation should enable real-time wide layout mode');
+          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'initialized conversation should widen constrained ChatGPT content even while collapsed');
+          layoutState.ui.timelineOpen = true;
+          api.applyLayout(layoutState);
+          assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'timeline UI state should not change wide layout mode');
+          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'timeline UI state should keep existing wide content markers stable');
+          layoutState.initialized = false;
+          api.applyLayout(layoutState);
+          assertEqual(document.body.classList.contains('tl-timeline-expanded'), false, 'leaving a conversation should leave wide layout mode');
+          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), false, 'leaving a conversation should remove temporary wide content markers');
+          wideMain.remove();
+
+          var uiState = api.createState();
+          uiState.initialized = true;
+          uiState.prefs.mode = 'collapsed';
+          uiState.groups = groups;
+          uiState.activeGroupId = groups[1].id;
+          uiState.ui.panel = document.createElement('aside');
+          uiState.ui.panel.id = 'tl-chat-timeline';
+          document.body.appendChild(uiState.ui.panel);
+          var jumpedGroupId = '';
+          var markerActions = { jumpToGroup: function(group) { jumpedGroupId = group.id; } };
+          api.applyLayout(uiState);
+          api.renderTimeline(uiState, markerActions);
+          window.TLTimelineModules.styles.ensureStyle();
+          var collapsedPanelWidth = window.getComputedStyle(uiState.ui.panel).width;
+          var collapsedRailRight = uiState.ui.panel.querySelector('.tl-marker-rail').getBoundingClientRect().right;
+          assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'collapsed timeline render should keep real-time wide layout enabled');
+          var lateMain = document.createElement('main');
+          var lateTarget = document.createElement('div');
+          lateTarget.className = 'max-w-2xl';
+          lateMain.appendChild(lateTarget);
+          document.body.appendChild(lateMain);
+          api.renderTimeline(uiState, markerActions);
+          assertEqual(lateTarget.classList.contains('tl-chat-width-expanded'), false, 'timeline render should not apply late layout targets');
+          api.applyLayout(uiState);
+          assertEqual(lateTarget.classList.contains('tl-chat-width-expanded'), true, 'explicit layout refresh should apply late layout targets independently of hover');
+          lateMain.remove();
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-timeline-marker').length, 2, 'collapsed timeline should render only marker rail entries');
+          assertEqual(uiState.ui.panel.querySelector('.tl-card') === null, true, 'minimal timeline should not render an expanded card');
+          assertEqual(uiState.ui.panel.querySelector('.tl-marker-active') !== null, true, 'minimal timeline should mark active entry');
+          assertEqual(uiState.ui.panel.querySelector('.tl-mode-toggle') === null, true, 'collapsed image-style timeline should not render the old menu button');
+          assertEqual(uiState.ui.panel.querySelector('.tl-mini-node') === null, true, 'collapsed image-style timeline should not render old circular nodes');
+          assertEqual(Number.parseFloat(collapsedPanelWidth) <= 36, true, 'minimal timeline hit area should stay narrow');
+          uiState.ui.panel.querySelector('.tl-marker-rail').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+          assertEqual(uiState.ui.panel.classList.contains('tl-collapsed'), true, 'hovering rail should keep the minimal timeline collapsed');
+          assertEqual(uiState.ui.panel.querySelector('.tl-card') === null, true, 'hovering rail should not render the old floating card');
+          assertEqual(uiState.ui.panel.querySelector('.tl-hover-card') !== null, true, 'hovering rail should render a compact preview card');
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-hover-row').length, 2, 'compact preview should render every available timeline row');
+          assertEqual(uiState.ui.panel.querySelector('.tl-hover-row.active .tl-hover-title').textContent, 'Second USART question', 'compact preview should highlight the active row title');
+          assertEqual(Number.parseFloat(window.getComputedStyle(uiState.ui.panel).width) > Number.parseFloat(collapsedPanelWidth), true, 'hovering rail should expand the invisible hit area for the clickable preview card');
+          assertEqual(Math.round(uiState.ui.panel.querySelector('.tl-marker-rail').getBoundingClientRect().right), Math.round(collapsedRailRight), 'hovering rail should keep the right rail fixed in place');
+          uiState.ui.panel.querySelector('.tl-hover-row').click();
+          assertEqual(jumpedGroupId, groups[0].id, 'clicking a compact preview row should jump directly to that group');
+          uiState.ui.panel.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+          assertEqual(uiState.ui.panel.querySelector('.tl-hover-card') !== null, true, 'leaving the rail should not immediately remove the clickable preview card');
+          uiState.ui.panel.querySelector('.tl-hover-card').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+          await new Promise(function(resolve) { setTimeout(resolve, 260); });
+          assertEqual(uiState.ui.panel.querySelector('.tl-hover-card') !== null, true, 'moving from rail into preview card should keep it clickable');
+          uiState.ui.panel.querySelector('.tl-hover-card').dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+          await new Promise(function(resolve) { setTimeout(resolve, 260); });
+          assertEqual(uiState.ui.panel.querySelector('.tl-hover-card') === null, true, 'leaving both rail and preview card should remove the compact preview card after a delay');
+          uiState.ui.panel.querySelector('.tl-timeline-marker').click();
+          assertEqual(jumpedGroupId, groups[0].id, 'clicking a marker should jump directly to that group');
+          assertEqual(uiState.prefs.mode, 'collapsed', 'clicking a marker should not pin or persist an expanded mode');
+
+          var longUiState = api.createState();
+          var longGroups = api.buildQaGroups(longTurns);
+          longUiState.initialized = true;
+          longUiState.prefs.mode = 'collapsed';
+          longUiState.groups = longGroups;
+          longUiState.activeGroupId = longGroups[14].id;
+          longUiState.ui.panel = document.createElement('aside');
+          longUiState.ui.panel.id = 'tl-chat-timeline';
+          document.body.appendChild(longUiState.ui.panel);
+          var longJumpedGroupId = '';
+          api.renderTimeline(longUiState, { jumpToGroup: function(group) { longJumpedGroupId = group.id; } });
+          assertEqual(longUiState.ui.panel.querySelectorAll('.tl-timeline-marker').length, 15, 'right rail should render every marker for a 15 question conversation');
+          longUiState.ui.panel.querySelector('.tl-marker-rail').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+          assertEqual(longUiState.ui.panel.querySelectorAll('.tl-hover-row').length, 15, 'hover preview should render every long conversation group, not only nearby rows');
+          assertEqual(longUiState.ui.panel.querySelector('.tl-hover-row.active .tl-hover-title').textContent, 'Long question 14', 'hover preview should highlight the active long conversation row');
+          assertEqual(longUiState.ui.panel.querySelector('.tl-hover-card').scrollTop > 0, true, 'long hover preview should scroll the active row into view');
+          longUiState.ui.panel.querySelector('.tl-hover-row').click();
+          assertEqual(longJumpedGroupId, longGroups[0].id, 'clicking a long preview row should jump directly to that group');
+          longUiState.ui.panel.remove();
+
+          uiState.prefs.mode = 'expanded';
+          uiState.apiCompleteness = { usedFallback: true, reason: 'selected-path-incomplete' };
+          api.renderTimeline(uiState, markerActions);
+          assertEqual(uiState.ui.panel.classList.contains('tl-collapsed'), true, 'legacy expanded preference should render the minimal collapsed rail');
+          assertEqual(uiState.ui.panel.querySelector('.tl-card') === null, true, 'legacy expanded preference should not render a floating card');
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-timeline-marker').length, 2, 'legacy expanded preference should still render marker entries');
+          assertEqual(uiState.ui.panel.querySelector('.tl-list-index') === null, true, 'minimal image-style timeline should not render old numeric indexes');
+          document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          assertEqual(uiState.prefs.mode, 'collapsed', 'rendering should normalize legacy expanded mode back to collapsed');
+          uiState.ui.panel.remove();
+          api.clearLayout();
+
+          assertMatch(api.getConversationApiUrls('abc').join('|'), /backend-api\/conversation\/abc/, 'API URL list should include primary backend endpoint');
+          write('PASS');
+        } catch (error) {
+          write('FAIL\n' + String(error && error.message ? error.message : error));
+        }
+      }, 0);
+    })();
+  </script>
+</body>
+</html>

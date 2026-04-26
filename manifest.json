@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Timeline Navigator",
+  "version": "1.0.0",
+  "description": "Timeline sidebar for ChatGPT conversations",
+  "permissions": [
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/token-capture.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": [
+        "src/core/utils.js",
+        "src/core/state.js",
+        "src/data/auth.js",
+        "src/data/conversation-api.js",
+        "src/data/dom-collector.js",
+        "src/ui/geometry.js",
+        "src/navigation/locator.js",
+        "src/ui/styles.js",
+        "src/ui/layout.js",
+        "src/ui/timeline.js",
+        "src/features/export.js",
+        "src/content-main.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
