@@ -13,6 +13,17 @@ A Chrome/Edge MV3 extension that adds a fixed right-side timeline to ChatGPT con
 - Expands a scrollable hover preview with all question groups for long conversations.
 - Exports selected user input and GPT output to Markdown or a browser print view for saving as PDF.
 
+## Latest Update
+
+The 2026-04-28 update focuses on a smoother long-conversation timeline:
+
+- Aligns the hover toolbar into two stable rows: search on the first row, filters and actions on the second row.
+- Fixes the 19+ conversation preview freeze by avoiding full card rebuilds during list scroll.
+- Uses native scrolling for medium-length previews and a virtual list window for very long conversations.
+- Reduces streaming refresh pressure by ignoring `characterData` mutations and timeline-owned DOM updates.
+
+Read the full update note: [Timeline UI and Performance Update](docs/2026-04-28-timeline-ui-performance-update.md).
+
 ## Install
 
 1. Open `chrome://extensions` or `edge://extensions`.
@@ -62,6 +73,17 @@ Use it as a release asset or extract it and load the extracted folder as an unpa
 - 鼠标悬浮时展开可滚动预览卡片，长对话会显示全部问题组。
 - 支持选择“我的输入”和“GPT 输出”，导出 Markdown，或通过浏览器打印保存为 PDF。
 
+## 最新更新
+
+2026-04-28 更新重点解决长对话时间线卡顿，并优化顶部工具栏排版：
+
+- 悬浮工具栏改为稳定两行布局：搜索框独占第一行，筛选和操作按钮在第二行对齐。
+- 修复 19 条以上对话预览滚动时卡住、无法点击第 19 行的问题。
+- 中等长度对话使用原生滚动，超长对话才启用虚拟列表窗口，减少 DOM 节点。
+- MutationObserver 不再监听 `characterData`，并忽略时间线自身 DOM 更新，降低流式输出期间的刷新压力。
+
+完整更新说明：[Timeline UI and Performance Update](docs/2026-04-28-timeline-ui-performance-update.md)。
+
 ## 安装
 
 1. 打开 `chrome://extensions` 或 `edge://extensions`。
@@ -94,24 +116,24 @@ packages/chatgpt-timeline-extension-v1.0.0.zip
 - `src/ui/styles.js` - 注入式时间线样式。
 - `src/content-main.js` - content script 主流程编排。
 
-## 近期工作总结（2026-04-27）
+## 近期工作总结（2026-04-28）
 
-本次主要完成了右侧时间线 UI 审美调整和长对话流畅性优化。
+本次主要完成了右侧时间线 UI 对齐美化、19+ 对话预览卡顿修复，以及长对话渲染稳定性优化。
 
 ### UI 调整
 
-- 将悬浮预览卡片改成更接近 Raycast / Linear 的专业工具风格：实体面板、高对比文字、紧凑列表和更清晰的 active 状态。
-- 顶部工具栏增加搜索框、角色筛选、“选择”开关、宽度控制、导出 Markdown 和导出 PDF 入口。
-- 默认隐藏每行复选框，只有进入“选择”模式后才显示导出勾选项，减少视觉干扰。
-- 保留右侧极简 marker rail，鼠标悬浮时展开可搜索、可选择、可跳转的预览列表。
+- 顶部工具栏调整为两行：搜索框第一行全宽显示，角色筛选和操作按钮第二行左右对齐。
+- 统一按钮高度、间距、边框半径和字体，减少截图中控件上下漂移、拥挤和错位的问题。
+- 保留右侧固定 marker rail，鼠标悬浮时展开可搜索、可选择、可导出、可跳转的预览列表。
+- 预览卡片桌面端宽度更适合放下 `选择 / 宽度 / 导出 MD / 导出 PDF`，窄屏仍允许自然换行。
 
 ### 长对话优化
 
-- 新增 `src/ui/virtual-list.js`，提供 `computeVirtualWindow()`，用于长列表虚拟渲染。
-- hover 预览列表改为固定行高虚拟列表，长对话只渲染可见窗口和少量 overscan 行，减少 DOM 节点数量。
-- 超长对话的右侧 marker rail 增加采样限制，避免一次性渲染过多 marker，同时保留当前 active marker。
-- scroll spy 增加 anchor 几何缓存，减少滚动时反复读取 `getBoundingClientRect()` 的开销。
-- MutationObserver 过滤时间线自身 DOM 变化，减少无意义刷新和布局重算。
+- hover 列表滚动不再触发整卡 `render()`，只更新 `previewScrollTop` 并 patch `.tl-hover-list-window`。
+- 19 条这类中等长度对话直接渲染全部行，使用浏览器原生滚动，保证滚动条和第 19 行点击稳定。
+- 300 条这类超长对话使用 `src/ui/virtual-list.js` 计算窗口，只渲染可见行和 overscan 行。
+- active marker 更新只 patch class，不触发完整 UI 重绘。
+- MutationObserver 不再监听 `characterData`，并忽略时间线自身 DOM 变化，减少流式输出期间的刷新压力。
 
 ### 涉及文件
 
@@ -123,6 +145,7 @@ packages/chatgpt-timeline-extension-v1.0.0.zip
 - `src/core/state.js`
 - `manifest.json`
 - `content-script.test.html`
+- `docs/2026-04-28-timeline-ui-performance-update.md`
 
 ### 验证记录
 
