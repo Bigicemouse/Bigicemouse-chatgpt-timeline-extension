@@ -32,9 +32,8 @@
 
   function findScrollTarget() {
     const documentTarget = root.document.scrollingElement || root.document.documentElement || root.document.body;
-    const sections = domCollector.collectTurnSections();
     const candidates = [];
-    let element = sections[0] || utils.qs('main');
+    let element = utils.qs('main');
     let best = null;
     let bestRange = 0;
 
@@ -123,21 +122,50 @@
     const scrollTarget = state.scrollEl || findScrollTarget();
     const metrics = getMetrics(scrollTarget);
     const referenceTop = metrics.scrollTop + metrics.clientHeight * 0.45;
+    const entries = getCachedAnchorEntries(state, scrollTarget);
+
+    entries.forEach(function(entry) {
+      if (!Number.isFinite(entry.anchorTop)) return;
+      if (entry.anchorTop <= referenceTop) activeId = entry.id;
+    });
+    return activeId;
+  }
+
+  function buildGroupSignature(groups) {
+    return (groups || []).map(function(group) {
+      const anchor = group && group.anchorTurn;
+      return [group && group.id, group && group.index, anchor && anchor.id, anchor && anchor.sortIndex].join(':');
+    }).join('|');
+  }
+
+  function getCachedAnchorEntries(state, scrollTarget) {
+    const signature = buildGroupSignature(state.groups);
+    const cache = state.anchorGeometryCache;
+    if (cache && cache.signature === signature && cache.scrollTarget === scrollTarget) {
+      return cache.entries || [];
+    }
+
     const sortedGroups = (state.groups || []).slice().sort(function(left, right) {
       return (left.index || 0) - (right.index || 0);
     });
-
-    sortedGroups.forEach(function(group) {
+    const entries = sortedGroups.map(function(group) {
       const anchor = group.anchorTurn && group.anchorTurn.el;
       const anchorTop = geometry && geometry.getElementTopInScrollContainer
         ? geometry.getElementTopInScrollContainer(anchor, scrollTarget)
         : null;
-      if (!Number.isFinite(anchorTop)) return;
-      if (anchorTop <= referenceTop) {
-        activeId = group.id;
-      }
+      return {
+        id: group.id,
+        index: group.index || 0,
+        anchorTop: Number.isFinite(anchorTop) ? anchorTop : null
+      };
     });
-    return activeId;
+
+    state.anchorGeometryCache = {
+      signature: signature,
+      scrollTarget: scrollTarget,
+      entries: entries
+    };
+    return entries;
   }
 
   ns.locator = {
