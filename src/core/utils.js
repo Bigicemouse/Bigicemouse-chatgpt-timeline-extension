@@ -24,6 +24,16 @@
     return normalized.slice(0, Math.max(0, maxLength - 3)).trim() + '...';
   }
 
+  function stableHash(text) {
+    let hash = 2166136261;
+    const input = String(text || '');
+    for (let index = 0; index < input.length; index += 1) {
+      hash ^= input.charCodeAt(index);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return (hash >>> 0).toString(36);
+  }
+
   function clamp(value, minValue, maxValue) {
     return Math.max(minValue, Math.min(maxValue, value));
   }
@@ -194,7 +204,15 @@
 
   function buildConversationSignature(turns) {
     return (turns || []).map(function(turn) {
-      return [turn.id, turn.role, turn.sortIndex, turn.seenInCurrentDom ? '1' : '0', turn.text].join(':');
+      const text = String(turn && turn.text || '');
+      return [
+        turn.id,
+        turn.role,
+        turn.sortIndex,
+        turn.seenInCurrentDom ? '1' : '0',
+        text.length,
+        stableHash(text)
+      ].join(':');
     }).join('|');
   }
 
@@ -202,6 +220,7 @@
     CONSTANTS: CONSTANTS,
     normalizeText: normalizeText,
     truncate: truncate,
+    stableHash: stableHash,
     clamp: clamp,
     qs: qs,
     qsa: qsa,

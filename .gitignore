@@ -1,4 +1,5 @@
 .codex-video-frames/
 .claude/
+.worktrees/
 .DS_Store
 Thumbs.db

@@ -15,6 +15,7 @@
   <script src="./src/navigation/locator.js"></script>
   <script src="./src/ui/styles.js"></script>
   <script src="./src/ui/layout.js"></script>
+  <script src="./src/ui/virtual-list.js"></script>
   <script src="./src/ui/timeline.js"></script>
   <script src="./src/features/export.js"></script>
   <script src="./src/content-main.js"></script>
@@ -55,11 +56,30 @@
           assertEqual(api.getDefaultPrefs().mode, 'collapsed', 'default UI mode should be collapsed');
           assertEqual(typeof api.formatConversationMarkdown, 'function', 'Markdown export formatter should stay available');
           assertEqual(typeof api.formatConversationJson, 'function', 'JSON export formatter should stay available');
+          assertEqual(typeof api.formatConversationPrintHtml, 'function', 'PDF print formatter should be exposed');
           assertEqual(api.buildExportFilename('Pointer Notes', 'json'), 'pointer-notes.json', 'JSON export filename should keep json extension');
-          assertEqual(api.buildExportFilename('Pointer Notes', 'pdf'), 'pointer-notes.md', 'unsupported export formats should fall back to markdown');
-          assertEqual(typeof api.formatConversationPrintHtml, 'undefined', 'PDF print formatter should not be exposed');
+          assertEqual(api.buildExportFilename('Pointer Notes', 'pdf'), 'pointer-notes.pdf', 'PDF export filename should keep pdf extension');
 
           assertEqual(api.normalizeText('  DMA\n timeout \t protection  '), 'DMA timeout protection', 'normalizeText should collapse whitespace');
+          assertEqual(typeof api.buildConversationSignature, 'function', 'conversation signatures should be exposed for performance tests');
+          var hugeTextTurns = [];
+          var hugeText = new Array(4000).join('x');
+          for (var hugeTextIndex = 0; hugeTextIndex < 80; hugeTextIndex += 1) {
+            hugeTextTurns.push({
+              id: 'huge-text-' + hugeTextIndex,
+              role: hugeTextIndex % 2 ? 'a' : 'u',
+              sortIndex: hugeTextIndex + 1,
+              seenInCurrentDom: true,
+              text: hugeText + hugeTextIndex
+            });
+          }
+          assertEqual(api.buildConversationSignature(hugeTextTurns).length < 3000, true, 'conversation signature should stay compact for very long threads');
+          assertEqual(typeof api.computeVirtualWindow, 'function', 'virtual list window calculator should be exposed for tests');
+          var virtualWindow = api.computeVirtualWindow({ itemCount: 300, rowHeight: 36, viewportHeight: 360, scrollTop: 360, overscan: 8 });
+          assertEqual(virtualWindow.startIndex, 2, 'virtual list should overscan before the visible window');
+          assertEqual(virtualWindow.endIndex, 28, 'virtual list should overscan after the visible window');
+          assertEqual(virtualWindow.totalHeight, 10800, 'virtual list should expose full scroll height');
+          assertEqual(virtualWindow.offsetTop, 72, 'virtual list should expose the rendered window offset');
 
           var conversationData = {
             current_node: 'a2',
@@ -101,6 +121,32 @@
           assertEqual(groups.length, 2, 'conversation JSON turns should build question groups');
           assertEqual(groups[0].summary, 'First GPIO question', 'question groups should keep chronological order');
           assertEqual(groups[1].summary, 'Second USART question', 'latest question group should stay below earlier groups');
+          var userOnlyMarkdown = api.formatConversationMarkdown(groups, { title: 'Pointer Notes', url: 'https://chatgpt.com/c/chat-123', includeUser: true, includeAssistant: false, exportedAt: '2026-04-27T00:00:00.000Z' });
+          assertMatch(userOnlyMarkdown, /## 1\. My input/, 'user-only Markdown should label user sections');
+          assertMatch(userOnlyMarkdown, /First GPIO question/, 'user-only Markdown should include user text');
+          assertEqual(userOnlyMarkdown.indexOf('First GPIO answer'), -1, 'user-only Markdown should exclude assistant text');
+          var assistantOnlyMarkdown = api.formatConversationMarkdown(groups, { title: 'Pointer Notes', includeUser: false, includeAssistant: true, exportedAt: '2026-04-27T00:00:00.000Z' });
+          assertMatch(assistantOnlyMarkdown, /## 1\. GPT output/, 'assistant-only Markdown should label assistant sections');
+          assertMatch(assistantOnlyMarkdown, /Second USART answer/, 'assistant-only Markdown should include assistant text');
+          assertEqual(assistantOnlyMarkdown.indexOf('Second USART question'), -1, 'assistant-only Markdown should exclude user text');
+          var fullMarkdown = api.formatConversationMarkdown(groups, { title: 'Pointer Notes', includeUser: true, includeAssistant: true, exportedAt: '2026-04-27T00:00:00.000Z' });
+          assertMatch(fullMarkdown, /## 1\. Conversation 1/, 'full Markdown should keep conversation sections');
+          assertMatch(fullMarkdown, /\*\*My input\*\*/, 'full Markdown should label user content');
+          assertMatch(fullMarkdown, /\*\*GPT output\*\*/, 'full Markdown should label assistant content');
+          var selectedGroupMarkdown = api.formatConversationMarkdown(groups, { title: 'Pointer Notes', selectedGroupIds: [groups[1].id], includeUser: true, includeAssistant: true, exportedAt: '2026-04-27T00:00:00.000Z' });
+          assertEqual(selectedGroupMarkdown.indexOf('First GPIO question'), -1, 'selected-group Markdown should exclude unselected groups');
+          assertMatch(selectedGroupMarkdown, /Second USART question/, 'selected-group Markdown should include the selected user text');
+          assertMatch(selectedGroupMarkdown, /Second USART answer/, 'selected-group Markdown should include the selected assistant text');
+          var selectedAssistantOnlyMarkdown = api.formatConversationMarkdown(groups, { title: 'Pointer Notes', selectedGroupIds: [groups[1].id], includeUser: false, includeAssistant: true, exportedAt: '2026-04-27T00:00:00.000Z' });
+          assertEqual(selectedAssistantOnlyMarkdown.indexOf('Second USART question'), -1, 'selected role and group filters should compose');
+          assertMatch(selectedAssistantOnlyMarkdown, /Second USART answer/, 'selected role and group filters should keep matching assistant text');
+          var printHtml = api.formatConversationPrintHtml(groups, { title: 'Pointer Notes', url: 'https://chatgpt.com/c/chat-123', includeUser: false, includeAssistant: true, exportedAt: '2026-04-27T00:00:00.000Z' });
+          assertMatch(printHtml, /<!doctype html>/i, 'PDF print formatter should return a complete HTML document');
+          assertMatch(printHtml, /Pointer Notes/, 'PDF print HTML should include title');
+          assertMatch(printHtml, /https:\/\/chatgpt\.com\/c\/chat-123/, 'PDF print HTML should include source URL');
+          assertMatch(printHtml, /GPT output/, 'PDF print HTML should include selected content label');
+          assertMatch(printHtml, /First GPIO answer/, 'PDF print HTML should include selected assistant text');
+          assertEqual(printHtml.indexOf('First GPIO question'), -1, 'PDF print HTML should exclude unselected user text');
           var rail = api.buildRailTimelineItems(groups, groups[1].id, 1);
           assertEqual(rail.items.length, 2, 'rail should expose every group even when maxItems is small');
           assertEqual(rail.items[0].title, 'First GPIO question', 'rail items should render earliest group first');
@@ -361,6 +407,7 @@
           var layoutState = api.createState();
           layoutState.initialized = true;
           layoutState.prefs.mode = 'collapsed';
+          assertEqual(layoutState.prefs.layoutMode, 'wide', 'default layout preference should be wide');
           layoutState.ui.timelineOpen = false;
           var wideMain = document.createElement('main');
           var wideTarget = document.createElement('div');
@@ -369,7 +416,19 @@
           document.body.appendChild(wideMain);
           api.applyLayout(layoutState);
           assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'initialized conversation should enable real-time wide layout mode');
+          assertEqual(document.body.classList.contains('tl-layout-wide'), true, 'default layout should apply the wide layout class');
           assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'initialized conversation should widen constrained ChatGPT content even while collapsed');
+          layoutState.prefs.layoutMode = 'default';
+          api.applyLayout(layoutState);
+          assertEqual(document.body.classList.contains('tl-layout-default'), true, 'default layout option should mark body as default layout');
+          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), false, 'default layout option should restore original content width');
+          layoutState.prefs.layoutMode = 'comfortable';
+          api.applyLayout(layoutState);
+          assertEqual(document.body.classList.contains('tl-layout-comfortable'), true, 'comfortable layout option should mark body as comfortable layout');
+          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'comfortable layout option should widen selected targets');
+          layoutState.prefs.layoutMode = 'full';
+          api.applyLayout(layoutState);
+          assertEqual(document.body.classList.contains('tl-layout-full'), true, 'full layout option should mark body as full layout');
           layoutState.ui.timelineOpen = true;
           api.applyLayout(layoutState);
           assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'timeline UI state should not change wide layout mode');
@@ -389,7 +448,17 @@
           uiState.ui.panel.id = 'tl-chat-timeline';
           document.body.appendChild(uiState.ui.panel);
           var jumpedGroupId = '';
-          var markerActions = { jumpToGroup: function(group) { jumpedGroupId = group.id; } };
+          var exportCalls = [];
+          var markerActions = {
+            jumpToGroup: function(group) { jumpedGroupId = group.id; },
+            exportConversation: function(format, options) { exportCalls.push({ format: format, options: options }); },
+            setLayoutMode: function(mode) {
+              uiState.prefs.layoutMode = api.normalizeLayoutMode(mode);
+              api.savePrefs(uiState);
+              api.applyLayout(uiState);
+              api.renderTimeline(uiState, markerActions);
+            }
+          };
           api.applyLayout(uiState);
           api.renderTimeline(uiState, markerActions);
           window.TLTimelineModules.styles.ensureStyle();
@@ -416,11 +485,72 @@
           assertEqual(uiState.ui.panel.classList.contains('tl-collapsed'), true, 'hovering rail should keep the minimal timeline collapsed');
           assertEqual(uiState.ui.panel.querySelector('.tl-card') === null, true, 'hovering rail should not render the old floating card');
           assertEqual(uiState.ui.panel.querySelector('.tl-hover-card') !== null, true, 'hovering rail should render a compact preview card');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-toolbar') !== null, true, 'hover preview should render the export toolbar');
+          assertEqual(uiState.ui.panel.querySelector('.tl-search-input') !== null, true, 'hover preview should render a search input');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-user input').checked, true, 'export toolbar should include user input by default');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-assistant input').checked, true, 'export toolbar should include GPT output by default');
+          assertEqual(uiState.ui.panel.querySelector('.tl-selection-toggle') !== null, true, 'export toolbar should render a selection mode toggle');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-md') !== null, true, 'export toolbar should render a Markdown button');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-md').textContent, '导出 MD', 'Markdown export button should describe its export action');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-pdf') !== null, true, 'export toolbar should render a PDF button');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-pdf').textContent, '导出 PDF', 'PDF export button should describe its export action');
+          assertEqual(uiState.ui.panel.querySelector('.tl-layout-button') !== null, true, 'export toolbar should render a layout width button');
+          assertEqual(uiState.ui.panel.querySelector('.tl-toolbar-controls') !== null, true, 'export toolbar should render a dedicated second control row');
+          assertEqual(uiState.ui.panel.querySelector('.tl-toolbar-controls .tl-export-choices') !== null, true, 'role filters should live in the toolbar control row');
+          assertEqual(uiState.ui.panel.querySelector('.tl-toolbar-controls .tl-export-buttons') !== null, true, 'action buttons should live in the toolbar control row');
+          assertEqual(uiState.ui.panel.querySelector('.tl-export-toolbar').firstElementChild.classList.contains('tl-search-wrap'), true, 'search should occupy the first toolbar row');
+          var toolbarRect = uiState.ui.panel.querySelector('.tl-export-toolbar').getBoundingClientRect();
+          var searchRect = uiState.ui.panel.querySelector('.tl-search-wrap').getBoundingClientRect();
+          var choicesRect = uiState.ui.panel.querySelector('.tl-export-choices').getBoundingClientRect();
+          var buttonsRect = uiState.ui.panel.querySelector('.tl-export-buttons').getBoundingClientRect();
+          assertEqual(searchRect.width >= toolbarRect.width - 32, true, 'search row should span the toolbar width');
+          assertEqual(choicesRect.right <= buttonsRect.left || choicesRect.bottom <= buttonsRect.top || buttonsRect.bottom <= choicesRect.top, true, 'toolbar second-row controls should not overlap');
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-row-select').length, 0, 'hover preview should hide row selectors until selection mode is enabled');
           assertEqual(uiState.ui.panel.querySelectorAll('.tl-hover-row').length, 2, 'compact preview should render every available timeline row');
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-hover-mark').length, 0, 'compact preview rows should not render a trailing row marker');
           assertEqual(uiState.ui.panel.querySelector('.tl-hover-row.active .tl-hover-title').textContent, 'Second USART question', 'compact preview should highlight the active row title');
           assertEqual(Number.parseFloat(window.getComputedStyle(uiState.ui.panel).width) > Number.parseFloat(collapsedPanelWidth), true, 'hovering rail should expand the invisible hit area for the clickable preview card');
           assertEqual(Math.round(uiState.ui.panel.querySelector('.tl-marker-rail').getBoundingClientRect().right), Math.round(collapsedRailRight), 'hovering rail should keep the right rail fixed in place');
-          uiState.ui.panel.querySelector('.tl-hover-row').click();
+          uiState.ui.panel.querySelector('.tl-search-input').value = 'Second';
+          uiState.ui.panel.querySelector('.tl-search-input').dispatchEvent(new Event('input', { bubbles: true }));
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-hover-row').length, 1, 'search should filter the preview rows');
+          assertEqual(uiState.ui.panel.querySelector('.tl-hover-title').textContent, 'Second USART question', 'search should keep matching conversation rows');
+          assertEqual(jumpedGroupId, '', 'typing in search should not trigger timeline navigation');
+          uiState.ui.panel.querySelector('.tl-search-input').value = '';
+          uiState.ui.panel.querySelector('.tl-search-input').dispatchEvent(new Event('input', { bubbles: true }));
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-hover-row').length, 2, 'clearing search should restore all preview rows');
+          uiState.ui.panel.querySelector('.tl-selection-toggle').click();
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-row-select').length, 2, 'selection mode should render a selector for every visible conversation row');
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-row-select:checked').length, 2, 'every conversation row should be selected by default');
+          uiState.ui.panel.querySelector('.tl-row-select').click();
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-row-select:checked').length, 1, 'clicking a row selector should remove that group from export selection');
+          uiState.ui.panel.querySelector('.tl-export-md').click();
+          assertEqual(exportCalls.length, 1, 'clicking Markdown export should call the export action');
+          assertEqual(exportCalls[0].format, 'md', 'Markdown export button should request Markdown format');
+          assertEqual(exportCalls[0].options.includeUser, true, 'Markdown export should include user input by default');
+          assertEqual(exportCalls[0].options.includeAssistant, true, 'Markdown export should include GPT output by default');
+          assertEqual(exportCalls[0].options.selectedGroupIds.length, 1, 'Markdown export should pass selected conversation groups');
+          assertEqual(exportCalls[0].options.selectedGroupIds[0], groups[1].id, 'Markdown export should omit unchecked conversation groups');
+          assertEqual(jumpedGroupId, '', 'clicking export should not trigger timeline row navigation');
+          uiState.ui.panel.querySelector('.tl-export-assistant input').click();
+          uiState.ui.panel.querySelector('.tl-export-pdf').click();
+          assertEqual(exportCalls.length, 2, 'clicking PDF export should call the export action');
+          assertEqual(exportCalls[1].format, 'pdf', 'PDF export button should request PDF format');
+          assertEqual(exportCalls[1].options.includeUser, true, 'PDF export should keep user input selected');
+          assertEqual(exportCalls[1].options.includeAssistant, false, 'PDF export should honor GPT output selection');
+          assertEqual(exportCalls[1].options.selectedGroupIds[0], groups[1].id, 'PDF export should pass selected conversation groups');
+          uiState.ui.panel.querySelector('.tl-row-select').click();
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-row-select:checked').length, 2, 'row selectors should allow restoring unchecked groups');
+          uiState.ui.panel.querySelector('.tl-row-select').click();
+          uiState.ui.panel.querySelectorAll('.tl-row-select')[1].click();
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-row-select:checked').length, 1, 'row selectors should keep at least one conversation selected');
+          assertEqual(jumpedGroupId, '', 'clicking row selectors should not trigger timeline navigation');
+          uiState.ui.panel.querySelector('.tl-layout-button').click();
+          assertEqual(uiState.ui.panel.querySelectorAll('.tl-layout-option').length, 4, 'layout menu should render four width options');
+          uiState.ui.panel.querySelector('[data-tl-layout-mode="default"]').click();
+          assertEqual(uiState.prefs.layoutMode, 'default', 'clicking a width option should update layout preference');
+          assertEqual(document.body.classList.contains('tl-layout-default'), true, 'clicking a width option should apply layout immediately');
+          uiState.ui.panel.querySelector('.tl-hover-title-button').click();
           assertEqual(jumpedGroupId, groups[0].id, 'clicking a compact preview row should jump directly to that group');
           uiState.ui.panel.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
           assertEqual(uiState.ui.panel.querySelector('.tl-hover-card') !== null, true, 'leaving the rail should not immediately remove the clickable preview card');
@@ -449,10 +579,174 @@
           longUiState.ui.panel.querySelector('.tl-marker-rail').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
           assertEqual(longUiState.ui.panel.querySelectorAll('.tl-hover-row').length, 15, 'hover preview should render every long conversation group, not only nearby rows');
           assertEqual(longUiState.ui.panel.querySelector('.tl-hover-row.active .tl-hover-title').textContent, 'Long question 14', 'hover preview should highlight the active long conversation row');
-          assertEqual(longUiState.ui.panel.querySelector('.tl-hover-card').scrollTop > 0, true, 'long hover preview should scroll the active row into view');
+          assertEqual(longUiState.ui.panel.querySelector('.tl-hover-list').scrollTop > 0, true, 'long hover preview should scroll the active row into view');
           longUiState.ui.panel.querySelector('.tl-hover-row').click();
           assertEqual(longJumpedGroupId, longGroups[0].id, 'clicking a long preview row should jump directly to that group');
           longUiState.ui.panel.remove();
+
+          var nineteenTurns = [];
+          for (var nineteenIndex = 0; nineteenIndex < 19; nineteenIndex += 1) {
+            nineteenTurns.push({ id: 'nineteen-u-' + nineteenIndex, role: 'u', text: 'Nineteen question ' + nineteenIndex, sortIndex: nineteenIndex * 2 + 1, order: nineteenIndex * 2 + 1 });
+            nineteenTurns.push({ id: 'nineteen-a-' + nineteenIndex, role: 'a', text: 'Nineteen answer ' + nineteenIndex, sortIndex: nineteenIndex * 2 + 2, order: nineteenIndex * 2 + 2 });
+          }
+          var nineteenGroups = api.buildQaGroups(nineteenTurns);
+          var nineteenUiState = api.createState();
+          nineteenUiState.initialized = true;
+          nineteenUiState.groups = nineteenGroups;
+          nineteenUiState.activeGroupId = nineteenGroups[18].id;
+          nineteenUiState.ui.panel = document.createElement('aside');
+          nineteenUiState.ui.panel.id = 'tl-chat-timeline';
+          document.body.appendChild(nineteenUiState.ui.panel);
+          var nineteenJumpedGroupId = '';
+          var nineteenActions = { jumpToGroup: function(group) { nineteenJumpedGroupId = group.id; } };
+          api.renderTimeline(nineteenUiState, nineteenActions);
+          nineteenUiState.ui.panel.querySelector('.tl-marker-rail').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+          var nineteenCard = nineteenUiState.ui.panel.querySelector('.tl-hover-card');
+          var nineteenList = nineteenUiState.ui.panel.querySelector('.tl-hover-list');
+          var nineteenRows = nineteenUiState.ui.panel.querySelectorAll('.tl-hover-row');
+          assertEqual(nineteenRows.length, 19, '19 question conversations should render every preview row with native scrolling');
+          nineteenList.scrollTop = nineteenList.scrollHeight;
+          nineteenList.dispatchEvent(new Event('scroll'));
+          await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+          assertEqual(nineteenUiState.ui.panel.querySelector('.tl-hover-card') === nineteenCard, true, 'scrolling a 19 row preview should not rebuild the hover card');
+          assertEqual(nineteenList.scrollTop > 0, true, 'scrolling a 19 row preview should preserve scroll position');
+          nineteenUiState.ui.panel.querySelector('[data-tl-group-id="' + nineteenGroups[18].id + '"] .tl-hover-title-button').click();
+          assertEqual(nineteenJumpedGroupId, nineteenGroups[18].id, 'clicking the 19th preview row should stay clickable after scrolling');
+          nineteenUiState.ui.panel.remove();
+
+          var hugeTurns = [];
+          for (var hugeIndex = 0; hugeIndex < 300; hugeIndex += 1) {
+            hugeTurns.push({ id: 'huge-u-' + hugeIndex, role: 'u', text: 'Huge question ' + hugeIndex, sortIndex: hugeIndex * 2 + 1, order: hugeIndex * 2 + 1 });
+            hugeTurns.push({ id: 'huge-a-' + hugeIndex, role: 'a', text: 'Huge answer ' + hugeIndex, sortIndex: hugeIndex * 2 + 2, order: hugeIndex * 2 + 2 });
+          }
+          var hugeGroups = api.buildQaGroups(hugeTurns);
+          var hugeUiState = api.createState();
+          hugeUiState.initialized = true;
+          hugeUiState.prefs.mode = 'collapsed';
+          hugeUiState.groups = hugeGroups;
+          hugeUiState.activeGroupId = hugeGroups[250].id;
+          hugeUiState.ui.panel = document.createElement('aside');
+          hugeUiState.ui.panel.id = 'tl-chat-timeline';
+          document.body.appendChild(hugeUiState.ui.panel);
+          api.renderTimeline(hugeUiState, {});
+          assertEqual(hugeUiState.ui.panel.querySelectorAll('.tl-timeline-marker').length <= 120, true, 'very long conversations should cap visible rail markers');
+          assertEqual(hugeUiState.ui.panel.querySelector('[data-tl-group-id="' + hugeGroups[250].id + '"]') !== null, true, 'capped rail should keep the active marker');
+          var hugeRailJumpedId = '';
+          hugeUiState.ui.panel.remove();
+          hugeUiState.ui.panel = document.createElement('aside');
+          hugeUiState.ui.panel.id = 'tl-chat-timeline';
+          document.body.appendChild(hugeUiState.ui.panel);
+          api.renderTimeline(hugeUiState, { jumpToGroup: function(group) { hugeRailJumpedId = group.id; } });
+          var hugeRail = hugeUiState.ui.panel.querySelector('.tl-marker-rail');
+          hugeRail.getBoundingClientRect = function() {
+            return { top: 100, bottom: 500, height: 400, left: 560, right: 586, width: 26 };
+          };
+          hugeRail.dispatchEvent(new MouseEvent('click', { bubbles: true, clientY: 300 }));
+          assertEqual(hugeRailJumpedId, hugeGroups[150].id, 'clicking an empty rail position should jump to the nearest conversation group by vertical ratio');
+          hugeUiState.ui.panel.querySelector('.tl-marker-rail').dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-report-header') !== null, true, 'hover preview should render a report-style header');
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-report-toolbar') !== null, true, 'hover preview should expose a compact report toolbar');
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-report-index') !== null, true, 'hover preview should render report-style index rows');
+          assertEqual(hugeUiState.ui.panel.querySelectorAll('.tl-hover-row').length <= 40, true, 'very long hover preview should only render the virtual window');
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-row').style.getPropertyValue('--tl-accent') !== '', true, 'report rows should expose accent colors');
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-row.active .tl-hover-title').textContent, 'Huge question 250', 'virtual preview should keep the active row rendered');
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-list').scrollTop > 0, true, 'virtual preview should scroll the active row into view');
+          var hugeCardBeforeScroll = hugeUiState.ui.panel.querySelector('.tl-hover-card');
+          var hugeListBeforeScroll = hugeUiState.ui.panel.querySelector('.tl-hover-list');
+          hugeListBeforeScroll.scrollTop = hugeListBeforeScroll.scrollTop + 52;
+          hugeListBeforeScroll.dispatchEvent(new Event('scroll'));
+          await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-card') === hugeCardBeforeScroll, true, 'virtual preview scroll should patch the list without rebuilding the card');
+          assertEqual(hugeUiState.ui.panel.querySelectorAll('.tl-hover-row').length <= 40, true, 'virtual preview scroll should keep rendering bounded to the window');
+          hugeUiState.ui.panel.querySelector('.tl-search-input').value = 'Huge question 299';
+          hugeUiState.ui.panel.querySelector('.tl-search-input').dispatchEvent(new Event('input', { bubbles: true }));
+          assertEqual(hugeUiState.ui.panel.querySelectorAll('.tl-hover-row').length, 1, 'search should keep virtual rendering small for long conversations');
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-title').textContent, 'Huge question 299', 'search should locate matching long conversation rows');
+          hugeUiState.ui.panel.remove();
+
+          assertEqual(typeof api.bindScrollSpy, 'function', 'scroll spy binder should be exposed for scheduling tests');
+          assertEqual(typeof api.findScrollTarget, 'function', 'scroll target detection should be exposed for performance tests');
+          assertEqual(typeof api.getConversationObserverConfig, 'function', 'conversation observer config should be exposed for mutation tests');
+          assertEqual(api.getConversationObserverConfig().characterData, false, 'conversation observer should not listen to streaming characterData changes');
+          assertEqual(typeof api.shouldIgnoreMutationBatch, 'function', 'timeline mutation filter should be exposed for mutation tests');
+          var mutationPanel = document.createElement('aside');
+          var mutationChild = document.createElement('div');
+          mutationPanel.id = 'tl-chat-timeline';
+          mutationPanel.appendChild(mutationChild);
+          assertEqual(api.shouldIgnoreMutationBatch([{ target: mutationPanel, addedNodes: [mutationChild], removedNodes: [] }]), true, 'timeline-owned DOM mutations should not schedule a conversation refresh');
+          assertEqual(api.shouldIgnoreMutationBatch([{ target: document.body, addedNodes: [document.createElement('main')], removedNodes: [] }]), false, 'external conversation DOM mutations should still be observed');
+          var originalQsa = window.TLTimelineModules.utils.qsa;
+          var broadTurnQueries = 0;
+          window.TLTimelineModules.utils.qsa = function(selector, target) {
+            if (/conversation-turn|message-author-role/i.test(String(selector || ''))) broadTurnQueries += 1;
+            return originalQsa(selector, target);
+          };
+          try {
+            api.findScrollTarget();
+            assertEqual(broadTurnQueries, 0, 'scroll target detection should not scan all conversation turns while opening a long page');
+          } finally {
+            window.TLTimelineModules.utils.qsa = originalQsa;
+          }
+          var originalRaf = window.requestAnimationFrame;
+          var originalCancelRaf = window.cancelAnimationFrame;
+          var rafCallbacks = [];
+          window.requestAnimationFrame = function(callback) {
+            rafCallbacks.push(callback);
+            return rafCallbacks.length;
+          };
+          window.cancelAnimationFrame = function() {};
+          try {
+            var scrollSpyState = api.createState();
+            var fakeScroll = document.createElement('div');
+            var firstAnchor = document.createElement('div');
+            var secondAnchor = document.createElement('div');
+            var fakeScrollTop = 0;
+            var anchorGeometryReads = 0;
+            Object.defineProperty(fakeScroll, 'clientHeight', { configurable: true, value: 400 });
+            Object.defineProperty(fakeScroll, 'scrollHeight', { configurable: true, value: 1200 });
+            Object.defineProperty(fakeScroll, 'scrollTop', {
+              configurable: true,
+              get: function() { return fakeScrollTop; },
+              set: function(value) { fakeScrollTop = Number(value) || 0; }
+            });
+            fakeScroll.getBoundingClientRect = function() { return { top: 0, bottom: 400, height: 400, left: 0, right: 100, width: 100 }; };
+            firstAnchor.getBoundingClientRect = function() {
+              anchorGeometryReads += 1;
+              return { top: -fakeScroll.scrollTop, bottom: 20 - fakeScroll.scrollTop, height: 20, left: 0, right: 100, width: 100 };
+            };
+            secondAnchor.getBoundingClientRect = function() {
+              anchorGeometryReads += 1;
+              return { top: 500 - fakeScroll.scrollTop, bottom: 520 - fakeScroll.scrollTop, height: 20, left: 0, right: 100, width: 100 };
+            };
+            scrollSpyState.initialized = true;
+            scrollSpyState.groups = [
+              { id: 'spy-group-1', index: 0, anchorTurn: { el: firstAnchor } },
+              { id: 'spy-group-2', index: 1, anchorTurn: { el: secondAnchor } }
+            ];
+            scrollSpyState.activeGroupId = 'spy-group-1';
+            scrollSpyState.ui.panel = document.createElement('aside');
+            scrollSpyState.ui.panel.id = 'tl-chat-timeline';
+            document.body.appendChild(scrollSpyState.ui.panel);
+            api.renderTimeline(scrollSpyState, {});
+            api.bindScrollSpy(scrollSpyState, fakeScroll);
+            fakeScroll.scrollTop = 500;
+            fakeScroll.dispatchEvent(new Event('scroll'));
+            fakeScroll.dispatchEvent(new Event('scroll'));
+            assertEqual(rafCallbacks.length, 1, 'scroll spy should coalesce repeated scroll events into one animation frame');
+            assertEqual(scrollSpyState.activeGroupId, 'spy-group-1', 'scroll spy should wait until the animation frame before updating active group');
+            rafCallbacks.shift()();
+            assertEqual(scrollSpyState.activeGroupId, 'spy-group-2', 'scroll spy animation frame should update the active group');
+            assertEqual(scrollSpyState.ui.panel.querySelector('[data-tl-group-id="spy-group-2"]').classList.contains('tl-marker-active'), true, 'scroll spy animation frame should update marker classes');
+            var readsAfterFirstFrame = anchorGeometryReads;
+            fakeScroll.scrollTop = 520;
+            fakeScroll.dispatchEvent(new Event('scroll'));
+            rafCallbacks.shift()();
+            assertEqual(anchorGeometryReads, readsAfterFirstFrame, 'scroll spy should reuse cached anchor geometry after the first measurement');
+            scrollSpyState.ui.panel.remove();
+          } finally {
+            window.requestAnimationFrame = originalRaf;
+            window.cancelAnimationFrame = originalCancelRaf;
+          }
 
           uiState.prefs.mode = 'expanded';
           uiState.apiCompleteness = { usedFallback: true, reason: 'selected-path-incomplete' };

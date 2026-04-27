@@ -9,8 +9,16 @@
   const timeline = ns.timeline;
   const layout = ns.layout;
   const geometry = ns.geometry;
+  const virtualList = ns.virtualList;
   const exportFeature = ns.exportFeature;
   const CONSTANTS = utils.CONSTANTS;
+  const CONVERSATION_OBSERVER_CONFIG = {
+    childList: true,
+    subtree: true,
+    characterData: false
+  };
+  const REFRESH_DEBOUNCE_MS = 220;
+  const STREAMING_REFRESH_DEBOUNCE_MS = 1000;
   const hasDom = !!(root && root.document && root.location);
   const state = stateModule.createState();
 
@@ -19,6 +27,23 @@
       if (state[key]) root.clearTimeout(state[key]);
       state[key] = null;
     });
+    cancelFrame(state, 'scrollFrame');
+    cancelFrame(state, 'resizeFrame');
+  }
+
+  function requestFrame(callback) {
+    if (root.requestAnimationFrame) return root.requestAnimationFrame(callback);
+    return root.setTimeout(callback, 16);
+  }
+
+  function cancelFrame(targetState, key) {
+    if (!targetState || !targetState[key]) return;
+    if (root.cancelAnimationFrame) {
+      root.cancelAnimationFrame(targetState[key]);
+    } else {
+      root.clearTimeout(targetState[key]);
+    }
+    targetState[key] = null;
   }
 
   function disconnectRuntime() {
@@ -73,6 +98,7 @@
     state.turns = nextTurns;
     state.groups = utils.buildQaGroups(nextTurns);
     state.lastSignature = signature;
+    state.anchorGeometryCache = null;
     state.activeGroupId = locator.computeActiveGroupId(state) || state.activeGroupId || (state.groups[0] && state.groups[0].id) || '';
     timeline.render(state, actions);
     return true;
@@ -159,46 +185,119 @@
     });
   }
 
-  function scheduleRefresh(force, routeToken, conversationId) {
+  function scheduleRefresh(force, routeToken, conversationId, delayMs) {
     const token = routeToken || state.routeToken;
     const id = conversationId || state.conversationId;
+    const delay = Math.max(0, Number(delayMs) || REFRESH_DEBOUNCE_MS);
     if (!isRouteCurrent(state, token, id)) return;
     if (state.refreshTimer) root.clearTimeout(state.refreshTimer);
     state.refreshTimer = root.setTimeout(function() {
       if (isRouteCurrent(state, token, id)) refreshFromDom(!!force, token, id);
-    }, 220);
+    }, delay);
+  }
+
+  function isAssistantStreaming() {
+    return !!(utils.qs('[data-testid="stop-button"]') ||
+      utils.qs('button[aria-label*="停止"]') ||
+      utils.qs('button[aria-label*="Stop"]'));
+  }
+
+  function getConversationObserverConfig() {
+    return Object.assign({}, CONVERSATION_OBSERVER_CONFIG);
+  }
+
+  function isTimelineNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if (node.id === CONSTANTS.PANEL_ID || node.id === CONSTANTS.STYLE_ID) return true;
+    return !!(node.closest && node.closest('#' + CONSTANTS.PANEL_ID));
+  }
+
+  function mutationBelongsToTimeline(mutation) {
+    if (!mutation) return false;
+    if (isTimelineNode(mutation.target)) return true;
+    const added = Array.prototype.slice.call(mutation.addedNodes || []);
+    const removed = Array.prototype.slice.call(mutation.removedNodes || []);
+    const touched = added.concat(removed);
+    return touched.length > 0 && touched.every(isTimelineNode);
+  }
+
+  function shouldIgnoreMutationBatch(mutations) {
+    const list = Array.prototype.slice.call(mutations || []);
+    return list.length > 0 && list.every(mutationBelongsToTimeline);
+  }
+
+  function hasLayoutRelevantMutation(mutations) {
+    return Array.prototype.slice.call(mutations || []).some(function(mutation) {
+      if (!mutation || mutation.type !== 'childList') return false;
+      if (mutationBelongsToTimeline(mutation)) return false;
+      return (mutation.addedNodes && mutation.addedNodes.length) || (mutation.removedNodes && mutation.removedNodes.length);
+    });
   }
 
   function observeConversation() {
     if (state.observer || !root.MutationObserver || !root.document.body) return;
     const target = utils.qs('main') || root.document.body;
-    state.observer = new MutationObserver(function() {
+    state.observer = new MutationObserver(function(mutations) {
+      if (shouldIgnoreMutationBatch(mutations)) return;
       if (root.location && root.location.href !== state.lastUrl) {
         handleRouteChange(false);
         return;
       }
-      if (state.initialized && layout) layout.applyLayout(state);
+      state.anchorGeometryCache = null;
+      if (state.initialized && layout && hasLayoutRelevantMutation(mutations)) layout.applyLayout(state);
       state.domCollectionReady = true;
-      scheduleRefresh(false, state.routeToken, state.conversationId);
+      scheduleRefresh(
+        false,
+        state.routeToken,
+        state.conversationId,
+        isAssistantStreaming() ? STREAMING_REFRESH_DEBOUNCE_MS : REFRESH_DEBOUNCE_MS
+      );
     });
-    state.observer.observe(target, { childList: true, subtree: true, characterData: true });
+    state.observer.observe(target, CONVERSATION_OBSERVER_CONFIG);
   }
 
   function bindScrollSpy() {
-    const nextScrollEl = locator.findScrollTarget();
-    if (!nextScrollEl || state.scrollEl === nextScrollEl) return;
-    if (state.scrollEl && state.scrollHandler) {
-      state.scrollEl.removeEventListener('scroll', state.scrollHandler);
+    const targetState = arguments.length > 0 && arguments[0] ? arguments[0] : state;
+    const explicitScrollEl = arguments.length > 1 ? arguments[1] : null;
+    const nextScrollEl = explicitScrollEl || locator.findScrollTarget();
+    if (!nextScrollEl || targetState.scrollEl === nextScrollEl) return;
+    if (targetState.scrollEl && targetState.scrollHandler) {
+      targetState.scrollEl.removeEventListener('scroll', targetState.scrollHandler);
     }
-    state.scrollEl = nextScrollEl;
-    state.scrollHandler = function() {
-      const nextActive = locator.computeActiveGroupId(state);
-      if (nextActive && nextActive !== state.activeGroupId) {
-        state.activeGroupId = nextActive;
-        timeline.updateActiveClasses(state);
-      }
+    cancelFrame(targetState, 'scrollFrame');
+    targetState.anchorGeometryCache = null;
+    targetState.scrollEl = nextScrollEl;
+    targetState.scrollHandler = function() {
+      scheduleScrollSpyUpdate(targetState);
     };
-    state.scrollEl.addEventListener('scroll', state.scrollHandler, { passive: true });
+    targetState.scrollEl.addEventListener('scroll', targetState.scrollHandler, { passive: true });
+  }
+
+  function scheduleScrollSpyUpdate(targetState) {
+    if (!targetState || targetState.scrollFrame) return;
+    targetState.scrollFrame = requestFrame(function() {
+      targetState.scrollFrame = null;
+      updateActiveGroupFromScroll(targetState);
+    });
+  }
+
+  function updateActiveGroupFromScroll(targetState) {
+    const nextActive = locator.computeActiveGroupId(targetState);
+    if (nextActive && nextActive !== targetState.activeGroupId) {
+      targetState.activeGroupId = nextActive;
+      timeline.updateActiveClasses(targetState);
+    }
+  }
+
+  function scheduleResizeRefresh() {
+    if (state.resizeFrame) return;
+    state.resizeFrame = requestFrame(function() {
+      state.resizeFrame = null;
+      if (!state.initialized) return;
+      state.anchorGeometryCache = null;
+      if (layout) layout.applyLayout(state);
+      timeline.render(state, actions);
+    });
   }
 
   function initConversation(conversationId) {
@@ -230,7 +329,7 @@
   function handleRouteChange(force) {
     const url = root.location && root.location.href;
     const conversationId = utils.getConversationIdFromUrl(url);
-    const hasConversationTurns = dom.collectTurnSections().length > 0;
+    const hasConversationTurns = conversationId ? false : dom.collectTurnSections().length > 0;
 
     if (!utils.shouldInitializeConversation(url, hasConversationTurns)) {
       if (state.initialized || force) destroy();
@@ -257,10 +356,7 @@
     };
     root.addEventListener('popstate', function() { handleRouteChange(false); });
     root.addEventListener('resize', function() {
-      if (state.initialized) {
-        if (layout) layout.applyLayout(state);
-        timeline.render(state, actions);
-      }
+      if (state.initialized) scheduleResizeRefresh();
     }, { passive: true });
     if (!state.urlCheckTimer) {
       state.urlCheckTimer = root.setInterval(function() {
@@ -269,12 +365,66 @@
     }
   }
 
+  function getExportTitle() {
+    const rawTitle = root.document && root.document.title || 'ChatGPT Conversation';
+    return utils.normalizeText(rawTitle.replace(/\s*[-|]\s*ChatGPT\s*$/i, '')) || 'ChatGPT Conversation';
+  }
+
+  function buildExportOptions(options) {
+    return {
+      title: getExportTitle(),
+      url: root.location && root.location.href || '',
+      exportedAt: new Date().toISOString(),
+      includeUser: !(options && options.includeUser === false),
+      includeAssistant: !(options && options.includeAssistant === false),
+      selectedGroupIds: Array.isArray(options && options.selectedGroupIds) ? options.selectedGroupIds.slice() : null
+    };
+  }
+
+  function exportMarkdown(options) {
+    if (!exportFeature || !exportFeature.formatConversationMarkdown || !exportFeature.downloadTextFile) return;
+    const exportOptions = buildExportOptions(options);
+    const content = exportFeature.formatConversationMarkdown(state.groups, exportOptions);
+    const filename = exportFeature.buildExportFilename(exportOptions.title, 'md');
+    exportFeature.downloadTextFile(filename, 'text/markdown;charset=utf-8', content);
+  }
+
+  function exportPdf(options) {
+    if (!exportFeature || !exportFeature.formatConversationPrintHtml) return;
+    const exportOptions = buildExportOptions(options);
+    const html = exportFeature.formatConversationPrintHtml(state.groups, exportOptions);
+    const printWindow = root.open && root.open('', '_blank');
+
+    if (!printWindow || !printWindow.document) return;
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.setTimeout(function() {
+      printWindow.print();
+    }, 120);
+  }
+
   const actions = {
     jumpToGroup: function(group) {
       if (!group || !group.anchorTurn) return;
       state.activeGroupId = group.id;
       timeline.updateActiveClasses(state);
       locator.jumpToTurn(state, group.anchorTurn);
+    },
+    exportConversation: function(format, options) {
+      if (!state.groups.length) return;
+      if (format === 'pdf') {
+        exportPdf(options);
+        return;
+      }
+      exportMarkdown(options);
+    },
+    setLayoutMode: function(mode) {
+      state.prefs.layoutMode = stateModule.normalizeLayoutMode(mode);
+      stateModule.savePrefs(state);
+      if (layout) layout.applyLayout(state);
+      timeline.render(state, actions);
     }
   };
 
@@ -288,6 +438,7 @@
     buildQaGroups: utils.buildQaGroups,
     buildRailTimelineItems: utils.buildRailTimelineItems,
     mergeTurnsById: utils.mergeTurnsById,
+    buildConversationSignature: utils.buildConversationSignature,
     shouldFetchConversation: shouldFetchConversation,
     isRouteCurrent: isRouteCurrent,
     buildAuthHeaders: auth && auth.buildAuthHeaders,
@@ -300,7 +451,9 @@
     cacheDomTurns: dom.cacheDomTurns,
     attachDomElementsToTurns: dom.attachDomElementsToTurns,
     buildTimelineGeometry: geometry && geometry.buildTimelineGeometry,
+    computeVirtualWindow: virtualList && virtualList.computeVirtualWindow,
     jumpToTurn: locator.jumpToTurn,
+    findScrollTarget: locator.findScrollTarget,
     getCollapsedItems: timeline.getCollapsedItems,
     renderTimeline: timeline.render,
     setTimelineMode: timeline.setMode,
@@ -309,8 +462,14 @@
     resetConversation: stateModule.resetConversation,
     applyLayout: layout && layout.applyLayout,
     clearLayout: layout && layout.clearLayout,
+    bindScrollSpy: bindScrollSpy,
+    getConversationObserverConfig: getConversationObserverConfig,
+    shouldIgnoreMutationBatch: shouldIgnoreMutationBatch,
     getDefaultPrefs: stateModule.getDefaultPrefs,
+    normalizeLayoutMode: stateModule.normalizeLayoutMode,
+    savePrefs: stateModule.savePrefs,
     formatConversationMarkdown: exportFeature && exportFeature.formatConversationMarkdown,
+    formatConversationPrintHtml: exportFeature && exportFeature.formatConversationPrintHtml,
     formatConversationJson: exportFeature && exportFeature.formatConversationJson,
     buildExportFilename: exportFeature && exportFeature.buildExportFilename
   };

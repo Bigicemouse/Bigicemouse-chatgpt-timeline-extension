@@ -26,6 +26,7 @@
         "src/navigation/locator.js",
         "src/ui/styles.js",
         "src/ui/layout.js",
+        "src/ui/virtual-list.js",
         "src/ui/timeline.js",
         "src/features/export.js",
         "src/content-main.js"

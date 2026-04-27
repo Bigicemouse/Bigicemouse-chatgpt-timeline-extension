@@ -3,6 +3,7 @@
 
   const EXPANDED_CLASS = 'tl-timeline-expanded';
   const CONTENT_CLASS = 'tl-chat-width-expanded';
+  const LAYOUT_CLASSES = ['tl-layout-default', 'tl-layout-comfortable', 'tl-layout-wide', 'tl-layout-full'];
   const CONTENT_SELECTOR = [
     'main [class*="max-w-"]',
     'main form [class*="max-w-"]',
@@ -36,16 +37,36 @@
     }
   }
 
+  function normalizeLayoutMode(state) {
+    const mode = state && state.prefs && state.prefs.layoutMode;
+    if (mode === 'default' || mode === 'comfortable' || mode === 'full') return mode;
+    return 'wide';
+  }
+
+  function clearLayoutClasses(body) {
+    LAYOUT_CLASSES.forEach(function(className) {
+      body.classList.remove(className);
+    });
+  }
+
   function applyLayout(state) {
     const body = root.document && root.document.body;
     if (!body || !body.classList) return;
     const shouldExpand = shouldReserveLayout(state);
     if (!shouldExpand) {
       body.classList.remove(EXPANDED_CLASS);
+      clearLayoutClasses(body);
       clearContentTargets();
       return;
     }
+    const layoutMode = normalizeLayoutMode(state);
     body.classList.add(EXPANDED_CLASS);
+    clearLayoutClasses(body);
+    body.classList.add('tl-layout-' + layoutMode);
+    if (layoutMode === 'default') {
+      clearContentTargets();
+      return;
+    }
     getContentTargets().forEach(function(node) {
       if (!node.classList.contains(CONTENT_CLASS)) node.classList.add(CONTENT_CLASS);
     });
@@ -53,7 +74,10 @@
 
   function clearLayout() {
     const body = root.document && root.document.body;
-    if (body && body.classList) body.classList.remove(EXPANDED_CLASS);
+    if (body && body.classList) {
+      body.classList.remove(EXPANDED_CLASS);
+      clearLayoutClasses(body);
+    }
     clearContentTargets();
   }
 
