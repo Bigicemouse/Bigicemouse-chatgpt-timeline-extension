@@ -28,7 +28,7 @@
 
 6. **PDF exports open browser print dialog only**: The `formatConversationPrintHtml` produces basic HTML with no dedicated PDF path, no page-break control, no proper print typography.
 
-7. **UI inconsistencies**: `--tl-marker-hover: #256f7a` (teal) vs `--tl-row-active-bg: #f3f6fb` (blue-tinted) create visual mismatch. Rail `border-radius: 8px` vs card `border-radius: 6px` are inconsistent. Toolbar is cramped with 6+ controls in ~390px.
+7. **UI inconsistencies**: the older accent palette mixed several strong hues and made the active row feel visually separate from the rail. Rail `border-radius: 8px` vs card `border-radius: 6px` are inconsistent. Toolbar is cramped with 6+ controls in ~390px.
 
 8. **`buildQaGroups` creates orphan groups for consecutive assistant messages** (`utils.js:105-113`): Tool calls and intermediate assistant messages get `userTurn: null` groups with short/empty summaries, multiplying marker count and breaking navigation.
 
@@ -434,7 +434,7 @@ Replace the inline style block in `formatConversationPrintHtml`:
 'h1{font-size:28px;font-weight:700;margin:0 0 12px;color:#111827;}' +
 'h2{font-size:20px;font-weight:600;margin:32px 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;color:#1f2937;}' +
 'h3{font-size:12px;font-weight:600;margin:0 0 8px;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;}' +
-'.meta{font-size:12px;color:#6b7280;margin:4px 0;}.meta a{color:#256f7a;}' +
+'.meta{font-size:12px;color:#6b7280;margin:4px 0;}.meta a{color:#2f6f5e;}' +
 '.group{margin:0 0 32px;page-break-inside:avoid;}' +
 '.turn{margin:12px 0;padding:16px 18px;border-radius:8px;background:#f9fafb;border:1px solid #e5e7eb;}' +
 '.turn.turn-a{background:#ffffff;border-color:#d1d5db;}' +
@@ -480,21 +480,21 @@ git commit -m "feat: improve PDF export with professional print typography and p
 
 - [ ] **Step 1: Unify accent colors**
 
-Replace the teal accent `#256f7a` with a more neutral blue-gray `#475569` for light mode and keep the sky-blue `#60a5fa` for dark mode. Update all `--tl-marker-hover`, `--tl-marker-active`, and `--tl-focus` references consistently:
+Replace the older saturated accents with a more neutral green-gray palette. Update all `--tl-marker-hover`, `--tl-marker-active`, and `--tl-focus` references consistently:
 
 ```css
 :root{
-  --tl-marker-hover:#475569;
-  --tl-marker-active:#475569;
-  --tl-focus:rgba(71,85,105,.28);
-  --tl-row-active-bg:#f1f5f9;
+  --tl-marker-hover:#2f6f5e;
+  --tl-marker-active:#2f6f5e;
+  --tl-focus:rgba(47,111,94,.30);
+  --tl-row-active-bg:#f2f7f4;
   --tl-row-hover-bg:#f8fafc;
 }
 html.dark{
-  --tl-marker-hover:#60a5fa;
-  --tl-marker-active:#60a5fa;
-  --tl-focus:rgba(96,165,250,.40);
-  --tl-row-active-bg:rgba(96,165,250,.14);
+  --tl-marker-hover:#86d7ac;
+  --tl-marker-active:#86d7ac;
+  --tl-focus:rgba(134,215,172,.34);
+  --tl-row-active-bg:rgba(134,215,172,.15);
   --tl-row-hover-bg:rgba(255,255,255,.06);
 }
 ```

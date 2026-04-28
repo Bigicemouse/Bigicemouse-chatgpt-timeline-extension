@@ -15,7 +15,7 @@
   const RAIL_MARKER_LIMIT = 120;
   const RAIL_TRACK_PADDING = 16;
   const RAIL_MIN_MARKER_GAP = 16;
-  const REPORT_ACCENTS = ['#8b5e3c', '#256f7a', '#7c5f9b', '#4f7d4f', '#b05d55'];
+  const REPORT_ACCENTS = ['#5f6a63', '#2f6f5e', '#6f7d4f', '#7a6f55', '#4f6f5f'];
 
   function destroyUI(state) {
     cancelHoverClose(state);

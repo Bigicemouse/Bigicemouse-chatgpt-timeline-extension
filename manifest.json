@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Timeline Navigator",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "version_name": "v2.00",
   "description": "Timeline sidebar for ChatGPT conversations",
   "permissions": [
     "storage",
