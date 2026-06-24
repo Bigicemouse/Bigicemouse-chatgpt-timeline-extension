@@ -13,17 +13,16 @@ Current version: **v2.00**
 - Falls back to rendered DOM collection when the API is unavailable.
 - Shows a minimal fixed right-side rail with clickable timeline markers.
 - Expands a scrollable hover preview with all question groups for long conversations.
-- Exports selected user input and GPT output to Markdown or a browser print view for saving as PDF.
 
 ## Latest Update
 
-Version **v2.00** focuses on a calmer visual style and a smoother long-conversation timeline:
+Version **v2.00** focuses on a compact screenshot-matched hover card and a smoother long-conversation timeline:
 
-- Aligns the hover toolbar into two stable rows: search on the first row, filters and actions on the second row.
+- Refreshes the hover timeline into a compact DeepSeek/Voyager-style index with a 302px dark card, one-line titles, and short blue/gray markers.
 - Fixes the 19+ conversation preview freeze by avoiding full card rebuilds during list scroll.
 - Uses native scrolling for medium-length previews and a virtual list window for very long conversations.
 - Reduces streaming refresh pressure by ignoring `characterData` mutations and timeline-owned DOM updates.
-- Replaces the previous red/blue accents with a neutral green-gray palette.
+- Keeps the collapsed rail short by sampling up to five marker ticks instead of rendering a full-height scrollbar-like rail.
 
 Read the full update note: [Timeline UI and Performance Update](docs/2026-04-28-timeline-ui-performance-update.md).
 
@@ -76,17 +75,16 @@ Use it as a release asset or extract it and load the extracted folder as an unpa
 - 当 API 不可用时，仍保留页面 DOM 读取作为降级方案。
 - 右侧固定极简时间线轨道，支持点击 marker 跳转到对应问题。
 - 鼠标悬浮时展开可滚动预览卡片，长对话会显示全部问题组。
-- 支持选择“我的输入”和“GPT 输出”，导出 Markdown，或通过浏览器打印保存为 PDF。
 
 ## 最新更新
 
-**v2.00** 更新重点解决长对话时间线卡顿，并把界面强调色改成更克制的中性绿色/灰绿色：
+**v2.00** 更新重点收尾当前截图风格的悬浮卡片，并解决长对话时间线卡顿：
 
-- 悬浮工具栏改为稳定两行布局：搜索框独占第一行，筛选和操作按钮在第二行对齐。
+- 悬浮时间轴改成更接近 DeepSeek / Voyager 的紧凑索引：302px 深色窄浮层、单行标题、蓝/灰短横 marker。
 - 修复 19 条以上对话预览滚动时卡住、无法点击第 19 行的问题。
 - 中等长度对话使用原生滚动，超长对话才启用虚拟列表窗口，减少 DOM 节点。
 - MutationObserver 不再监听 `characterData`，并忽略时间线自身 DOM 更新，降低流式输出期间的刷新压力。
-- 去掉原来偏红、偏蓝的强调色，当前 UI 统一为更安静的绿色/灰绿色系。
+- 右侧折叠 rail 保持短节点栈，最多采样 5 个 marker，避免变成长滚动条样式。
 
 完整更新说明：[Timeline UI and Performance Update](docs/2026-04-28-timeline-ui-performance-update.md)。
 
@@ -128,11 +126,11 @@ packages/chatgpt-timeline-extension-v2.00.zip
 
 ### UI 调整
 
-- 顶部工具栏调整为两行：搜索框第一行全宽显示，角色筛选和操作按钮第二行左右对齐。
-- 统一按钮高度、间距、边框半径和字体，减少截图中控件上下漂移、拥挤和错位的问题。
-- 去掉原来偏红、偏蓝的强调色，改为中性绿色/灰绿色，整体更安静、统一。
-- 保留右侧固定 marker rail，鼠标悬浮时展开可搜索、可选择、可导出、可跳转的预览列表。
-- 预览卡片桌面端宽度更适合放下 `选择 / 宽度 / 导出 MD / 导出 PDF`，窄屏仍允许自然换行。
+- 悬浮预览改为紧凑索引列表，去除旧的搜索、筛选、宽度和导出工具栏。
+- 卡片宽度为 `min(302px, calc(100vw - 32px))`，列表高度 224px，行高 42px。
+- 当前项和 focus 使用 `#6ea0ff` 蓝色强调，普通 marker 使用 `#5b5b5b` 灰色。
+- 保留右侧固定短 marker rail，鼠标悬浮时展开可滚动、可跳转的预览列表。
+- 折叠 rail 最多采样 5 个短横 marker；hover 卡片打开后隐藏独立 rail，避免双层标记干扰。
 
 ### 长对话优化
 

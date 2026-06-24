@@ -8,14 +8,13 @@
   const geometry = ns.geometry;
   const virtualList = ns.virtualList;
   const CONSTANTS = utils.CONSTANTS;
-  const PREVIEW_ROW_HEIGHT = 52;
-  const PREVIEW_VIEWPORT_HEIGHT = 288;
+  const PREVIEW_ROW_HEIGHT = 42;
+  const PREVIEW_VIEWPORT_HEIGHT = 224;
   const PREVIEW_OVERSCAN = 8;
   const PREVIEW_FULL_RENDER_LIMIT = 40;
-  const RAIL_MARKER_LIMIT = 120;
-  const RAIL_TRACK_PADDING = 16;
-  const RAIL_MIN_MARKER_GAP = 16;
-  const REPORT_ACCENTS = ['#5f6a63', '#2f6f5e', '#6f7d4f', '#7a6f55', '#4f6f5f'];
+  const RAIL_MARKER_LIMIT = 5;
+  const RAIL_TRACK_PADDING = 8;
+  const RAIL_MIN_MARKER_GAP = 20;
 
   function destroyUI(state) {
     cancelHoverClose(state);
@@ -110,6 +109,12 @@
     render(state, actions || {});
   }
 
+  function activatePreviewGroup(state, groupId) {
+    if (!state || !groupId || state.activeGroupId === groupId) return;
+    state.activeGroupId = groupId;
+    if (state.ui) state.ui.previewAutoScrollKey = '';
+  }
+
   function setMode(state, mode, actions) {
     state.prefs.mode = 'collapsed';
     prefs.savePrefs(state);
@@ -165,6 +170,8 @@
       const group = getRailGroupFromClick(state.groups, event, rail);
       if (!group) return;
       event.stopPropagation();
+      activatePreviewGroup(state, group.id);
+      openHoverPreview(state, actions);
       if (actions.jumpToGroup) actions.jumpToGroup(group);
     };
   }
@@ -211,15 +218,19 @@
   }
 
   function applyMarkerNode(node, item, state, actions) {
+    const label = (item.index + 1) + '/' + state.groups.length + ' ' + item.title;
+
     node.classList.toggle('tl-marker-active', !!item.active);
     node.classList.toggle('active', !!item.active);
-    node.title = (item.index + 1) + '/' + state.groups.length + ' ' + item.title;
-    node.setAttribute('aria-label', node.title);
+    node.removeAttribute('title');
+    node.setAttribute('aria-label', label);
+    node.setAttribute('data-tl-label', label);
     node.setAttribute('data-tl-group-id', item.id);
     node.style.top = item.y + 'px';
-    node.style.setProperty('--tl-accent', getAccentColor(item.index));
     node.onclick = function(event) {
       event.stopPropagation();
+      activatePreviewGroup(state, item.id);
+      openHoverPreview(state, actions);
       if (actions.jumpToGroup) actions.jumpToGroup(item.group);
     };
   }
@@ -227,11 +238,6 @@
   function escapeAttributeValue(value) {
     if (root.CSS && root.CSS.escape) return root.CSS.escape(String(value));
     return String(value || '').replace(/["\\]/g, '\\$&');
-  }
-
-  function getAccentColor(index) {
-    const normalized = Math.max(0, Number(index) || 0);
-    return REPORT_ACCENTS[normalized % REPORT_ACCENTS.length];
   }
 
   function getRailGroupFromClick(groups, event, rail) {
@@ -262,13 +268,9 @@
     if (!allItems.length) {
       return { contentHeight: 0, items: [] };
     }
-    if (allItems.length <= RAIL_MARKER_LIMIT && geometry && geometry.buildTimelineGeometry) {
-      return geometry.buildTimelineGeometry(groups, activeGroupId, scrollTarget);
-    }
-
     const sampledItems = sampleRailItems(allItems, activeGroupId, RAIL_MARKER_LIMIT);
     const contentHeight = Math.max(
-      160,
+      48,
       RAIL_TRACK_PADDING * 2 + Math.max(0, sampledItems.length - 1) * RAIL_MIN_MARKER_GAP
     );
     const usableHeight = Math.max(1, contentHeight - RAIL_TRACK_PADDING * 2);
@@ -343,55 +345,19 @@
       scheduleHoverClose(state, actions);
     });
 
-    renderReportHeader(card, state, previewItems);
-    ensureSelectedExportGroups(state);
-    renderExportToolbar(card, state, actions);
     renderPreviewList(card, state, actions, previewItems, activeId);
     panel.appendChild(card);
 
     const list = utils.qs('.tl-hover-list', card);
     if (list) list.scrollTop = Number(state.ui.previewScrollTop) || 0;
-    restoreSearchFocus(card, state);
-  }
-
-  function renderReportHeader(card, state, previewItems) {
-    const header = utils.createElement('div', 'tl-report-header');
-    const titleWrap = utils.createElement('div', 'tl-report-heading');
-    const eyebrow = utils.createElement('div', 'tl-report-eyebrow', 'Conversation Index');
-    const title = utils.createElement('div', 'tl-report-title', '对话目录');
-    const metaText = (previewItems.length || 0) + '/' + ((state.groups && state.groups.length) || 0) + ' 条';
-    const meta = utils.createElement('div', 'tl-report-meta', metaText);
-
-    titleWrap.appendChild(eyebrow);
-    titleWrap.appendChild(title);
-    header.appendChild(titleWrap);
-    header.appendChild(meta);
-    card.appendChild(header);
-  }
-
-  function getSearchQuery(state) {
-    return utils.normalizeText(state && state.ui && state.ui.searchQuery).toLowerCase();
   }
 
   function getFilteredPreviewItems(state, activeId) {
-    const allItems = utils.buildRailTimelineItems(state.groups, activeId).items;
-    const query = getSearchQuery(state);
-    if (!query) return allItems;
-    return allItems.filter(function(item) {
-      const group = item.group || {};
-      const haystack = [
-        item.title,
-        group.summary,
-        group.assistantSummary,
-        group.searchText
-      ].join(' ').toLowerCase();
-      return haystack.indexOf(query) !== -1;
-    });
+    return utils.buildRailTimelineItems(state.groups, activeId).items;
   }
 
   function getPreviewScrollTop(state, items, activeId) {
-    const query = getSearchQuery(state);
-    const key = [activeId, items.length, query].join('|');
+    const key = [activeId, items.length].join('|');
     const maxScrollTop = Math.max(0, items.length * PREVIEW_ROW_HEIGHT - PREVIEW_VIEWPORT_HEIGHT);
 
     if (state.ui.previewAutoScrollKey !== key) {
@@ -484,40 +450,18 @@
   }
 
   function renderPreviewRow(state, actions, item) {
-    const selected = isExportGroupSelected(state, item.group);
-    const selectionMode = !!state.ui.selectionMode;
-    const row = utils.createElement('div', 'tl-hover-row' +
-      (item.active ? ' active' : '') +
-      (selected ? '' : ' tl-row-unselected') +
-      (selectionMode ? ' tl-selection-mode' : ''));
+    const row = utils.createElement('div', 'tl-hover-row' + (item.active ? ' active' : ''));
     const titleButton = utils.createElement('button', 'tl-hover-title-button');
-    const index = utils.createElement('span', 'tl-hover-index', String((item.index || 0) + 1).padStart(2, '0'));
     const body = utils.createElement('span', 'tl-hover-body');
     const title = utils.createElement('span', 'tl-hover-title', item.title);
-    const summary = utils.createElement('span', 'tl-hover-summary', utils.truncate(item.group && item.group.assistantSummary || item.group && item.group.summary || '', 96));
 
-    row.title = (item.index + 1) + '/' + state.groups.length + ' ' + item.group.summary;
+    row.setAttribute('aria-label', (item.index + 1) + '/' + state.groups.length + ' ' + item.group.summary);
     row.setAttribute('data-tl-group-id', item.id);
     row.style.height = PREVIEW_ROW_HEIGHT + 'px';
-    row.style.setProperty('--tl-accent', getAccentColor(item.index));
     row.addEventListener('click', function(event) {
       event.stopPropagation();
       if (actions.jumpToGroup) actions.jumpToGroup(item.group);
     });
-
-    if (selectionMode) {
-      const select = utils.createElement('input', 'tl-row-select');
-      select.type = 'checkbox';
-      select.checked = selected;
-      select.setAttribute('aria-label', '选择导出 ' + item.title);
-      select.addEventListener('click', function(event) {
-        event.stopPropagation();
-      });
-      select.addEventListener('change', function() {
-        setExportGroupSelected(state, item.group, select.checked, select, actions);
-      });
-      row.appendChild(select);
-    }
 
     titleButton.type = 'button';
     titleButton.addEventListener('click', function(event) {
@@ -525,256 +469,10 @@
       if (actions.jumpToGroup) actions.jumpToGroup(item.group);
     });
     body.appendChild(title);
-    if (summary.textContent && summary.textContent !== title.textContent) body.appendChild(summary);
-    titleButton.appendChild(index);
     titleButton.appendChild(body);
     row.appendChild(titleButton);
     return row;
   }
-
-  function getExportOptions(state) {
-    if (!state.ui.exportOptions) {
-      state.ui.exportOptions = {
-        includeUser: true,
-        includeAssistant: true
-      };
-    }
-    if (!state.ui.exportOptions.includeUser && !state.ui.exportOptions.includeAssistant) {
-      state.ui.exportOptions.includeUser = true;
-      state.ui.exportOptions.includeAssistant = true;
-    }
-    return state.ui.exportOptions;
-  }
-
-  function ensureSelectedExportGroups(state) {
-    if (!state.ui.exportGroupSelection) state.ui.exportGroupSelection = {};
-    const selection = state.ui.exportGroupSelection;
-    const known = {};
-    (state.groups || []).forEach(function(group) {
-      if (!group || !group.id) return;
-      known[group.id] = true;
-      if (typeof selection[group.id] !== 'boolean') selection[group.id] = true;
-    });
-    Object.keys(selection).forEach(function(id) {
-      if (!known[id]) delete selection[id];
-    });
-    if ((state.groups || []).length && !getSelectedGroupIds(state).length) {
-      selection[state.groups[0].id] = true;
-    }
-    return selection;
-  }
-
-  function getSelectedGroupIds(state) {
-    const selection = state.ui.exportGroupSelection || {};
-    return (state.groups || []).filter(function(group) {
-      return group && group.id && selection[group.id] !== false;
-    }).map(function(group) {
-      return group.id;
-    });
-  }
-
-  function isExportGroupSelected(state, group) {
-    ensureSelectedExportGroups(state);
-    return !!(group && state.ui.exportGroupSelection[group.id] !== false);
-  }
-
-  function setExportGroupSelected(state, group, selected, input, actions) {
-    if (!group || !group.id) return;
-    const selection = ensureSelectedExportGroups(state);
-    const selectedIds = getSelectedGroupIds(state);
-    if (!selected && selectedIds.length <= 1 && selection[group.id] !== false) {
-      if (input) input.checked = true;
-      return;
-    }
-    selection[group.id] = !!selected;
-    if (input) {
-      input.checked = !!selected;
-      const row = input.closest && input.closest('.tl-hover-row');
-      if (row && row.classList) row.classList.toggle('tl-row-unselected', !selected);
-    }
-  }
-
-  function setExportOption(state, key, value, input) {
-    const options = getExportOptions(state);
-    options[key] = !!value;
-    if (!options.includeUser && !options.includeAssistant) {
-      options[key] = true;
-      if (input) input.checked = true;
-    }
-  }
-
-  function renderExportToolbar(card, state, actions) {
-    const options = getExportOptions(state);
-    const toolbar = utils.createElement('div', 'tl-export-toolbar tl-report-toolbar');
-    const searchWrap = utils.createElement('div', 'tl-search-wrap');
-    const controls = utils.createElement('div', 'tl-toolbar-controls');
-    const choices = utils.createElement('div', 'tl-export-choices');
-    const buttons = utils.createElement('div', 'tl-export-buttons');
-
-    toolbar.addEventListener('click', function(event) {
-      event.stopPropagation();
-    });
-
-    searchWrap.appendChild(renderSearchInput(state, actions));
-    choices.appendChild(renderExportChoice(state, 'tl-export-user', '我的输入', 'includeUser', options.includeUser));
-    choices.appendChild(renderExportChoice(state, 'tl-export-assistant', 'GPT 输出', 'includeAssistant', options.includeAssistant));
-    buttons.appendChild(renderSelectionToggle(state, actions));
-    buttons.appendChild(renderLayoutControl(state, actions));
-    buttons.appendChild(renderExportButton('导出 MD', 'tl-export-md', 'md', state, actions));
-    buttons.appendChild(renderExportButton('导出 PDF', 'tl-export-pdf', 'pdf', state, actions));
-    controls.appendChild(choices);
-    controls.appendChild(buttons);
-    toolbar.appendChild(searchWrap);
-    toolbar.appendChild(controls);
-    card.appendChild(toolbar);
-  }
-
-  function renderSearchInput(state, actions) {
-    const input = utils.createElement('input', 'tl-search-input');
-    input.type = 'search';
-    input.value = state.ui.searchQuery || '';
-    input.placeholder = '搜索对话';
-    input.setAttribute('aria-label', '搜索对话');
-    input.addEventListener('click', function(event) {
-      event.stopPropagation();
-    });
-    input.addEventListener('focus', function() {
-      state.ui.searchFocus = true;
-    });
-    input.addEventListener('blur', function() {
-      state.ui.searchFocus = false;
-    });
-    input.addEventListener('input', function() {
-      state.ui.searchQuery = input.value;
-      state.ui.searchFocus = true;
-      state.ui.searchSelectionStart = input.selectionStart;
-      state.ui.previewScrollTop = 0;
-      state.ui.previewAutoScrollKey = '';
-      render(state, actions || {});
-    });
-    return input;
-  }
-
-  function restoreSearchFocus(card, state) {
-    const input = state && state.ui && state.ui.searchFocus ? utils.qs('.tl-search-input', card) : null;
-    if (!input || !input.focus) return;
-    try {
-      input.focus();
-      if (input.setSelectionRange) {
-        const cursor = Number.isFinite(Number(state.ui.searchSelectionStart))
-          ? Number(state.ui.searchSelectionStart)
-          : String(input.value || '').length;
-        input.setSelectionRange(cursor, cursor);
-      }
-    } catch (error) {
-      // Ignore focus failures; the timeline remains usable with mouse navigation.
-    }
-  }
-
-  function renderSelectionToggle(state, actions) {
-    const selectedCount = getSelectedGroupIds(state).length;
-    const totalCount = (state.groups || []).length;
-    const button = utils.createElement(
-      'button',
-      'tl-export-button tl-selection-toggle' + (state.ui.selectionMode ? ' active' : ''),
-      state.ui.selectionMode ? ('完成 ' + selectedCount + '/' + totalCount) : '选择'
-    );
-    button.type = 'button';
-    button.addEventListener('click', function(event) {
-      event.stopPropagation();
-      state.ui.selectionMode = !state.ui.selectionMode;
-      render(state, actions || {});
-    });
-    return button;
-  }
-
-  function renderExportChoice(state, className, text, key, checked) {
-    const label = utils.createElement('label', 'tl-export-choice ' + className);
-    const input = utils.createElement('input');
-    const caption = utils.createElement('span', '', text);
-
-    input.type = 'checkbox';
-    input.checked = !!checked;
-    input.addEventListener('click', function(event) {
-      event.stopPropagation();
-    });
-    input.addEventListener('change', function() {
-      setExportOption(state, key, input.checked, input);
-    });
-    label.appendChild(input);
-    label.appendChild(caption);
-    return label;
-  }
-
-  function renderExportButton(text, className, format, state, actions) {
-    const button = utils.createElement('button', 'tl-export-button ' + className, text);
-    button.type = 'button';
-    button.addEventListener('click', function(event) {
-      event.stopPropagation();
-      if (actions.exportConversation) {
-        const options = getExportOptions(state);
-        actions.exportConversation(format, {
-          includeUser: options.includeUser,
-          includeAssistant: options.includeAssistant,
-          selectedGroupIds: getSelectedGroupIds(state)
-        });
-      }
-    });
-    return button;
-  }
-
-  function getLayoutMode(state) {
-    return prefs.normalizeLayoutMode(state && state.prefs && state.prefs.layoutMode);
-  }
-
-  function renderLayoutControl(state, actions) {
-    const wrap = utils.createElement('div', 'tl-layout-control');
-    const button = utils.createElement('button', 'tl-export-button tl-layout-button', '宽度');
-    const modes = [
-      { id: 'default', label: '默认' },
-      { id: 'comfortable', label: '舒适' },
-      { id: 'wide', label: '宽屏' },
-      { id: 'full', label: '全宽' }
-    ];
-
-    button.type = 'button';
-    button.setAttribute('aria-haspopup', 'menu');
-    button.setAttribute('aria-expanded', state.ui.layoutMenuOpen ? 'true' : 'false');
-    button.addEventListener('click', function(event) {
-      event.stopPropagation();
-      state.ui.layoutMenuOpen = !state.ui.layoutMenuOpen;
-      render(state, actions || {});
-    });
-    wrap.appendChild(button);
-
-    if (state.ui.layoutMenuOpen) {
-      const menu = utils.createElement('div', 'tl-layout-menu');
-      const activeMode = getLayoutMode(state);
-      menu.setAttribute('role', 'menu');
-      modes.forEach(function(mode) {
-        const item = utils.createElement('button', 'tl-layout-option' + (mode.id === activeMode ? ' active' : ''), mode.label);
-        item.type = 'button';
-        item.setAttribute('data-tl-layout-mode', mode.id);
-        item.addEventListener('click', function(event) {
-          event.stopPropagation();
-          state.ui.layoutMenuOpen = false;
-          if (actions.setLayoutMode) {
-            actions.setLayoutMode(mode.id);
-            return;
-          }
-          state.prefs.layoutMode = prefs.normalizeLayoutMode(mode.id);
-          prefs.savePrefs(state);
-          if (layout) layout.applyLayout(state);
-          render(state, actions || {});
-        });
-        menu.appendChild(item);
-      });
-      wrap.appendChild(menu);
-    }
-
-    return wrap;
-  }
-
   function getCollapsedItems(groups, activeGroupId, maxItems) {
     const all = utils.buildRailTimelineItems(groups, activeGroupId).items;
     const limit = Math.max(1, maxItems || 12);

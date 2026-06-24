@@ -10,7 +10,7 @@
   const layout = ns.layout;
   const geometry = ns.geometry;
   const virtualList = ns.virtualList;
-  const exportFeature = ns.exportFeature;
+  const formulaCopy = ns.formulaCopy;
   const CONSTANTS = utils.CONSTANTS;
   const CONVERSATION_OBSERVER_CONFIG = {
     childList: true,
@@ -365,46 +365,6 @@
     }
   }
 
-  function getExportTitle() {
-    const rawTitle = root.document && root.document.title || 'ChatGPT Conversation';
-    return utils.normalizeText(rawTitle.replace(/\s*[-|]\s*ChatGPT\s*$/i, '')) || 'ChatGPT Conversation';
-  }
-
-  function buildExportOptions(options) {
-    return {
-      title: getExportTitle(),
-      url: root.location && root.location.href || '',
-      exportedAt: new Date().toISOString(),
-      includeUser: !(options && options.includeUser === false),
-      includeAssistant: !(options && options.includeAssistant === false),
-      selectedGroupIds: Array.isArray(options && options.selectedGroupIds) ? options.selectedGroupIds.slice() : null
-    };
-  }
-
-  function exportMarkdown(options) {
-    if (!exportFeature || !exportFeature.formatConversationMarkdown || !exportFeature.downloadTextFile) return;
-    const exportOptions = buildExportOptions(options);
-    const content = exportFeature.formatConversationMarkdown(state.groups, exportOptions);
-    const filename = exportFeature.buildExportFilename(exportOptions.title, 'md');
-    exportFeature.downloadTextFile(filename, 'text/markdown;charset=utf-8', content);
-  }
-
-  function exportPdf(options) {
-    if (!exportFeature || !exportFeature.formatConversationPrintHtml) return;
-    const exportOptions = buildExportOptions(options);
-    const html = exportFeature.formatConversationPrintHtml(state.groups, exportOptions);
-    const printWindow = root.open && root.open('', '_blank');
-
-    if (!printWindow || !printWindow.document) return;
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.setTimeout(function() {
-      printWindow.print();
-    }, 120);
-  }
-
   const actions = {
     jumpToGroup: function(group) {
       if (!group || !group.anchorTurn) return;
@@ -412,21 +372,46 @@
       timeline.updateActiveClasses(state);
       locator.jumpToTurn(state, group.anchorTurn);
     },
-    exportConversation: function(format, options) {
-      if (!state.groups.length) return;
-      if (format === 'pdf') {
-        exportPdf(options);
-        return;
-      }
-      exportMarkdown(options);
-    },
     setLayoutMode: function(mode) {
-      state.prefs.layoutMode = stateModule.normalizeLayoutMode(mode);
-      stateModule.savePrefs(state);
-      if (layout) layout.applyLayout(state);
-      timeline.render(state, actions);
+      applyLayoutMode(mode);
     }
   };
+
+  function savePopupLayoutMode(layoutMode) {
+    if (!root.chrome || !root.chrome.storage || !root.chrome.storage.local || !root.chrome.storage.local.set) return;
+    try {
+      root.chrome.storage.local.set({ tlLayoutMode: layoutMode });
+    } catch (error) {
+      // Ignore extension storage failures; local page prefs still apply.
+    }
+  }
+
+  function applyLayoutMode(mode) {
+    const layoutMode = stateModule.normalizeLayoutMode(mode);
+    state.prefs.layoutMode = layoutMode;
+    stateModule.savePrefs(state);
+    savePopupLayoutMode(layoutMode);
+    if (layout) layout.applyLayout(state);
+    timeline.render(state, actions);
+    return layoutMode;
+  }
+
+  function handleRuntimeMessage(message, sender, sendResponse) {
+    if (!message || !message.type) return false;
+    if (message.type === 'tl-get-layout-mode') {
+      if (sendResponse) sendResponse({
+        ok: true,
+        layoutMode: stateModule.normalizeLayoutMode(state.prefs && state.prefs.layoutMode)
+      });
+      return true;
+    }
+    if (message.type === 'tl-set-layout-mode') {
+      const layoutMode = applyLayoutMode(message.layoutMode);
+      if (sendResponse) sendResponse({ ok: true, layoutMode: layoutMode });
+      return true;
+    }
+    return false;
+  }
 
   const testApi = {
     normalizeText: utils.normalizeText,
@@ -468,10 +453,8 @@
     getDefaultPrefs: stateModule.getDefaultPrefs,
     normalizeLayoutMode: stateModule.normalizeLayoutMode,
     savePrefs: stateModule.savePrefs,
-    formatConversationMarkdown: exportFeature && exportFeature.formatConversationMarkdown,
-    formatConversationPrintHtml: exportFeature && exportFeature.formatConversationPrintHtml,
-    formatConversationJson: exportFeature && exportFeature.formatConversationJson,
-    buildExportFilename: exportFeature && exportFeature.buildExportFilename
+    handleRuntimeMessage: handleRuntimeMessage,
+    formulaCopy: formulaCopy
   };
 
   root.__TL_TEST_API__ = testApi;
@@ -485,6 +468,10 @@
   };
 
   if (!hasDom || !root.location.hostname.includes('chatgpt.com')) return;
+  if (root.chrome && root.chrome.runtime && root.chrome.runtime.onMessage && root.chrome.runtime.onMessage.addListener) {
+    root.chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+  }
+  if (formulaCopy && formulaCopy.initialize) formulaCopy.initialize();
   hookHistory();
   if (root.document.readyState === 'loading') {
     root.document.addEventListener('DOMContentLoaded', function() { handleRouteChange(true); });
