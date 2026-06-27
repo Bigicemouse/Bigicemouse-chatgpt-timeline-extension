@@ -8,23 +8,34 @@
 <body>
   <main class="tl-popup" aria-label="ChatGPT Timeline Navigator">
     <header class="tl-popup-title">ChatGPT Timeline Navigator</header>
-    <section class="tl-popup-section" aria-label="宽度">
-      <button type="button" class="tl-popup-option" data-layout-mode="default">
-        <span>默认</span>
-        <span class="tl-popup-dot" aria-hidden="true"></span>
-      </button>
-      <button type="button" class="tl-popup-option" data-layout-mode="comfortable">
-        <span>舒适</span>
-        <span class="tl-popup-dot" aria-hidden="true"></span>
-      </button>
-      <button type="button" class="tl-popup-option" data-layout-mode="wide">
-        <span>宽屏</span>
-        <span class="tl-popup-dot" aria-hidden="true"></span>
-      </button>
-      <button type="button" class="tl-popup-option" data-layout-mode="full">
-        <span>全宽</span>
-        <span class="tl-popup-dot" aria-hidden="true"></span>
-      </button>
+    <section class="tl-popup-section" aria-label="插件">
+      <label class="tl-popup-plugin">
+        <span class="tl-popup-plugin-text">
+          <span class="tl-popup-plugin-title">公式复制</span>
+          <span class="tl-popup-plugin-desc">点击 GPT 公式复制 LaTeX</span>
+        </span>
+        <input id="tl-formula-copy-toggle" class="tl-popup-toggle-input" type="checkbox">
+        <span class="tl-popup-toggle" aria-hidden="true"></span>
+      </label>
+      <label class="tl-popup-plugin">
+        <span class="tl-popup-plugin-text">
+          <span class="tl-popup-plugin-title">舒适阅读宽度</span>
+          <span class="tl-popup-plugin-desc">只调整文本和输入框宽度</span>
+        </span>
+        <input id="tl-reading-width-toggle" class="tl-popup-toggle-input" type="checkbox">
+        <span class="tl-popup-toggle" aria-hidden="true"></span>
+      </label>
+      <div class="tl-popup-slider-row">
+        <label class="tl-popup-slider-label" for="tl-reading-width-slider">
+          <span>阅读宽度（px）</span>
+          <output id="tl-reading-width-value">1276</output>
+        </label>
+        <input id="tl-reading-width-slider" type="range" min="600" max="1600" step="1" value="1276">
+        <div class="tl-popup-slider-hints" aria-hidden="true">
+          <span>更窄</span>
+          <span>更宽</span>
+        </div>
+      </div>
     </section>
   </main>
   <script src="./popup.js"></script>

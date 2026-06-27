@@ -4,6 +4,7 @@
   const TOAST_OFFSET_Y = 40;
 
   let initialized = false;
+  let enabled = true;
   let toast = null;
   let toastTimer = null;
 
@@ -146,6 +147,7 @@
   }
 
   function handleClick(event) {
+    if (!enabled) return;
     if (hasTextSelection()) return;
     const mathElement = findMathElement(event.target);
     if (!mathElement) return;
@@ -170,6 +172,15 @@
     initialized = true;
   }
 
+  function setEnabled(nextEnabled) {
+    enabled = nextEnabled !== false;
+    return enabled;
+  }
+
+  function isEnabled() {
+    return enabled;
+  }
+
   function destroy() {
     if (initialized && root.document && root.document.removeEventListener) {
       root.document.removeEventListener('click', handleClick, true);
@@ -184,6 +195,8 @@
   ns.formulaCopy = {
     initialize: initialize,
     destroy: destroy,
+    setEnabled: setEnabled,
+    isEnabled: isEnabled,
     findMathElement: findMathElement,
     extractLatexSource: extractLatexSource,
     isDisplayMode: isDisplayMode,

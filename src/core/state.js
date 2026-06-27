@@ -2,11 +2,16 @@
   const ns = root.TLTimelineModules = root.TLTimelineModules || {};
   const utils = ns.utils;
   const CONSTANTS = utils.CONSTANTS;
+  const DEFAULT_READING_WIDTH_PX = 1276;
+  const MIN_READING_WIDTH_PX = 600;
+  const MAX_READING_WIDTH_PX = 1600;
 
   function getDefaultPrefs() {
     return {
       mode: 'collapsed',
-      layoutMode: 'wide'
+      readingWidthEnabled: true,
+      readingWidthPx: DEFAULT_READING_WIDTH_PX,
+      formulaCopyEnabled: true
     };
   }
 
@@ -14,9 +19,14 @@
     return 'collapsed';
   }
 
-  function normalizeLayoutMode(mode) {
-    if (mode === 'default' || mode === 'comfortable' || mode === 'full') return mode;
-    return 'wide';
+  function normalizeReadingWidth(value) {
+    const width = Math.round(Number(value) || DEFAULT_READING_WIDTH_PX);
+    return utils.clamp(width, MIN_READING_WIDTH_PX, MAX_READING_WIDTH_PX);
+  }
+
+  function normalizeBoolean(value, fallback) {
+    if (value === true || value === false) return value;
+    return fallback;
   }
 
   function loadPrefs() {
@@ -27,7 +37,9 @@
       const parsed = JSON.parse(root.localStorage.getItem(CONSTANTS.PREFS_KEY) || '{}');
       return {
         mode: normalizeMode(parsed.mode || parsed.timelineMode),
-        layoutMode: normalizeLayoutMode(parsed.layoutMode)
+        readingWidthEnabled: normalizeBoolean(parsed.readingWidthEnabled, defaults.readingWidthEnabled),
+        readingWidthPx: normalizeReadingWidth(parsed.readingWidthPx),
+        formulaCopyEnabled: normalizeBoolean(parsed.formulaCopyEnabled, defaults.formulaCopyEnabled)
       };
     } catch (error) {
       return defaults;
@@ -39,7 +51,9 @@
     try {
       root.localStorage.setItem(CONSTANTS.PREFS_KEY, JSON.stringify({
         mode: normalizeMode(state.prefs.mode),
-        layoutMode: normalizeLayoutMode(state.prefs.layoutMode)
+        readingWidthEnabled: normalizeBoolean(state.prefs.readingWidthEnabled, true),
+        readingWidthPx: normalizeReadingWidth(state.prefs.readingWidthPx),
+        formulaCopyEnabled: normalizeBoolean(state.prefs.formulaCopyEnabled, true)
       }));
     } catch (error) {
       // Ignore storage failures; navigation should still work.
@@ -105,7 +119,11 @@
   ns.state = {
     getDefaultPrefs: getDefaultPrefs,
     normalizeMode: normalizeMode,
-    normalizeLayoutMode: normalizeLayoutMode,
+    normalizeReadingWidth: normalizeReadingWidth,
+    normalizeBoolean: normalizeBoolean,
+    DEFAULT_READING_WIDTH_PX: DEFAULT_READING_WIDTH_PX,
+    MIN_READING_WIDTH_PX: MIN_READING_WIDTH_PX,
+    MAX_READING_WIDTH_PX: MAX_READING_WIDTH_PX,
     loadPrefs: loadPrefs,
     savePrefs: savePrefs,
     createState: createState,

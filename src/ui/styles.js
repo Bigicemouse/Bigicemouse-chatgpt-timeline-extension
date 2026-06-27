@@ -55,26 +55,9 @@
           --tl-focus:rgba(110,160,255,.34);
         }
       }
-      body.tl-timeline-expanded.tl-layout-comfortable .tl-chat-width-expanded{
-        max-width:min(1120px, calc(100vw - var(--tl-panel-space))) !important;
-        width:100% !important;
-        margin-left:auto !important;
-        margin-right:auto !important;
-        transition:max-width .18s ease;
-      }
-      body.tl-timeline-expanded.tl-layout-wide .tl-chat-width-expanded{
-        max-width:calc(100vw - var(--tl-panel-space)) !important;
-        width:100% !important;
-        margin-left:auto !important;
-        margin-right:auto !important;
-        transition:max-width .18s ease;
-      }
-      body.tl-timeline-expanded.tl-layout-full .tl-chat-width-expanded{
-        max-width:calc(100vw - var(--tl-panel-space) - 18px) !important;
-        width:100% !important;
-        margin-left:auto !important;
-        margin-right:auto !important;
-        transition:max-width .18s ease;
+      body.gv-plugin-chatgpt-readable [class*='--thread-content-max-width']{
+        --thread-content-max-width:var(--gv-plugin-reading-width, 1276px) !important;
+        max-width:var(--gv-plugin-reading-width, 1276px) !important;
       }
       #${CONSTANTS.PANEL_ID}{
         position:fixed;
