@@ -389,58 +389,72 @@
           var layoutState = api.createState();
           layoutState.initialized = true;
           layoutState.prefs.mode = 'collapsed';
-          assertEqual(layoutState.prefs.layoutMode, 'wide', 'default layout preference should be wide');
+          assertEqual(layoutState.prefs.readingWidthEnabled, true, 'reading width should be enabled by default');
+          assertEqual(layoutState.prefs.readingWidthPx, 1276, 'default reading width should use the Voyager-style selected width');
+          assertEqual(layoutState.prefs.formulaCopyEnabled, true, 'formula copy should be enabled by default');
           layoutState.ui.timelineOpen = false;
           var wideMain = document.createElement('main');
-          var wideTarget = document.createElement('div');
-          wideTarget.className = 'max-w-3xl';
-          wideMain.appendChild(wideTarget);
+          var nativeMaxTarget = document.createElement('div');
+          var threadWidthTarget = document.createElement('div');
+          var imageTarget = document.createElement('img');
+          nativeMaxTarget.className = 'max-w-3xl';
+          threadWidthTarget.className = 'max-w-(--thread-content-max-width)';
+          threadWidthTarget.appendChild(imageTarget);
+          wideMain.appendChild(nativeMaxTarget);
+          wideMain.appendChild(threadWidthTarget);
           document.body.appendChild(wideMain);
           api.applyLayout(layoutState);
-          assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'initialized conversation should enable real-time wide layout mode');
-          assertEqual(document.body.classList.contains('tl-layout-wide'), true, 'default layout should apply the wide layout class');
-          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'initialized conversation should widen constrained ChatGPT content even while collapsed');
-          layoutState.prefs.layoutMode = 'default';
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), true, 'initialized conversation should enable the Voyager readable body class');
+          assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '1276px', 'reading width should be stored as a body CSS variable');
+          assertEqual(nativeMaxTarget.classList.contains('tl-chat-width-expanded'), false, 'plain max-w containers should not be marked or widened');
+          assertEqual(imageTarget.classList.contains('tl-chat-width-expanded'), false, 'image elements should not be marked or resized by layout logic');
+          assertEqual(threadWidthTarget.classList.contains('tl-chat-width-expanded'), false, 'Voyager layout should not add legacy width marker classes');
+          layoutState.prefs.readingWidthPx = 1120;
           api.applyLayout(layoutState);
-          assertEqual(document.body.classList.contains('tl-layout-default'), true, 'default layout option should mark body as default layout');
-          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), false, 'default layout option should restore original content width');
-          layoutState.prefs.layoutMode = 'comfortable';
+          assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '1120px', 'reading width should update from preferences');
+          layoutState.prefs.readingWidthEnabled = false;
           api.applyLayout(layoutState);
-          assertEqual(document.body.classList.contains('tl-layout-comfortable'), true, 'comfortable layout option should mark body as comfortable layout');
-          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'comfortable layout option should widen selected targets');
-          layoutState.prefs.layoutMode = 'full';
-          api.applyLayout(layoutState);
-          assertEqual(document.body.classList.contains('tl-layout-full'), true, 'full layout option should mark body as full layout');
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), false, 'disabled reading width should remove the Voyager readable class');
+          assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '', 'disabled reading width should clear the body CSS variable');
+          layoutState.prefs.readingWidthEnabled = true;
           layoutState.ui.timelineOpen = true;
           api.applyLayout(layoutState);
-          assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'timeline UI state should not change wide layout mode');
-          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), true, 'timeline UI state should keep existing wide content markers stable');
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), true, 'timeline UI state should not change reading width mode');
           layoutState.initialized = false;
           api.applyLayout(layoutState);
-          assertEqual(document.body.classList.contains('tl-timeline-expanded'), false, 'leaving a conversation should leave wide layout mode');
-          assertEqual(wideTarget.classList.contains('tl-chat-width-expanded'), false, 'leaving a conversation should remove temporary wide content markers');
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), false, 'leaving a conversation should clear reading width mode');
           wideMain.remove();
 
           assertEqual(typeof api.handleRuntimeMessage, 'function', 'content script should expose the popup runtime message handler');
           var runtimeMain = document.createElement('main');
           var runtimeTarget = document.createElement('div');
           var runtimeResponse = null;
-          runtimeTarget.className = 'max-w-runtime';
+          runtimeTarget.className = 'max-w-(--thread-content-max-width)';
           runtimeMain.appendChild(runtimeTarget);
           document.body.appendChild(runtimeMain);
           window.TLTimelineModules.app.state.initialized = true;
-          window.TLTimelineModules.app.state.prefs.layoutMode = 'wide';
-          assertEqual(api.handleRuntimeMessage({ type: 'tl-set-layout-mode', layoutMode: 'comfortable' }, {}, function(response) {
+          window.TLTimelineModules.app.state.prefs.readingWidthEnabled = true;
+          window.TLTimelineModules.app.state.prefs.readingWidthPx = 1276;
+          assertEqual(api.handleRuntimeMessage({ type: 'tl-set-reading-width', readingWidthPx: 1120 }, {}, function(response) {
             runtimeResponse = response;
-          }), true, 'popup set-layout message should be handled synchronously');
-          assertEqual(runtimeResponse.layoutMode, 'comfortable', 'popup set-layout message should return the normalized mode');
-          assertEqual(document.body.classList.contains('tl-layout-comfortable'), true, 'popup set-layout message should apply the selected width class');
-          assertEqual(runtimeTarget.classList.contains('tl-chat-width-expanded'), true, 'popup set-layout message should update content width targets');
+          }), true, 'popup set-reading-width message should be handled synchronously');
+          assertEqual(runtimeResponse.readingWidthPx, 1120, 'popup set-reading-width message should return the normalized width');
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), true, 'popup set-reading-width message should apply the readable class');
+          assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '1120px', 'popup set-reading-width message should update the body CSS variable');
+          assertEqual(runtimeTarget.classList.contains('tl-chat-width-expanded'), false, 'popup set-reading-width should not add legacy marker classes');
           runtimeResponse = null;
-          assertEqual(api.handleRuntimeMessage({ type: 'tl-get-layout-mode' }, {}, function(response) {
+          assertEqual(api.handleRuntimeMessage({ type: 'tl-set-reading-width-enabled', enabled: false }, {}, function(response) {
             runtimeResponse = response;
-          }), true, 'popup get-layout message should be handled synchronously');
-          assertEqual(runtimeResponse.layoutMode, 'comfortable', 'popup get-layout message should report the current mode');
+          }), true, 'popup reading-width toggle message should be handled synchronously');
+          assertEqual(runtimeResponse.readingWidthEnabled, false, 'popup reading-width toggle should return the disabled state');
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), false, 'popup reading-width toggle should remove the readable class');
+          assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '', 'popup reading-width toggle should clear the CSS variable');
+          runtimeResponse = null;
+          assertEqual(api.handleRuntimeMessage({ type: 'tl-get-plugin-settings' }, {}, function(response) {
+            runtimeResponse = response;
+          }), true, 'popup get-plugin-settings message should be handled synchronously');
+          assertEqual(runtimeResponse.readingWidthPx, 1120, 'popup get-plugin-settings message should report the current width');
+          assertEqual(runtimeResponse.formulaCopyEnabled, true, 'popup get-plugin-settings message should report formula copy state');
           window.TLTimelineModules.app.state.initialized = false;
           api.clearLayout();
           runtimeMain.remove();
@@ -448,6 +462,8 @@
           var uiState = api.createState();
           uiState.initialized = true;
           uiState.prefs.mode = 'collapsed';
+          uiState.prefs.readingWidthEnabled = true;
+          uiState.prefs.readingWidthPx = 1276;
           uiState.groups = groups;
           uiState.activeGroupId = groups[1].id;
           uiState.ui.panel = document.createElement('aside');
@@ -456,12 +472,6 @@
           var jumpedGroupId = '';
           var markerActions = {
             jumpToGroup: function(group) { jumpedGroupId = group.id; },
-            setLayoutMode: function(mode) {
-              uiState.prefs.layoutMode = api.normalizeLayoutMode(mode);
-              api.savePrefs(uiState);
-              api.applyLayout(uiState);
-              api.renderTimeline(uiState, markerActions);
-            }
           };
           api.applyLayout(uiState);
           api.renderTimeline(uiState, markerActions);
@@ -479,6 +489,8 @@
           assertMatch(styleText, /\.tl-marker-track\{[\s\S]*scrollbar-width:none/, 'collapsed node stack should not expose a scrollbar slider');
           assertMatch(styleText, /\.tl-timeline-marker\{[\s\S]*width:44px;[\s\S]*height:22px/, 'collapsed nodes should use short horizontal hit areas, not a long rail');
           assertMatch(styleText, /\.tl-timeline-marker\.tl-marker-active::after,[\s\S]*width:34px;[\s\S]*height:4px/, 'current node should be a blue short horizontal line');
+          assertMatch(styleText, /body\.gv-plugin-chatgpt-readable \[class\*='--thread-content-max-width'\]\{[\s\S]*--thread-content-max-width:var\(--gv-plugin-reading-width, 1276px\)/, 'reading width should use the Voyager thread-content CSS variable selector');
+          assertEqual(/tl-chat-width-expanded img|tl-layout-comfortable|tl-layout-wide|tl-layout-full/.test(styleText), false, 'reading width CSS should not keep legacy broad image or layout overrides');
           assertMatch(styleText, /max-height:min\(224px/, 'hover preview card should stay small');
           assertMatch(styleText, /\.tl-hover-card\{[\s\S]*scrollbar-width:none/, 'hover preview card should not show a scrollbar slider');
           assertMatch(styleText, /\.tl-hover-list\{[\s\S]*scrollbar-width:none/, 'hover preview list should remain scrollable without a visible scrollbar slider');
@@ -487,16 +499,16 @@
           assertMatch(styleText, /@keyframes tl-hover-card-in/, 'DeepSeek-style card should animate into place instead of appearing as a separate static popup');
           var collapsedPanelWidth = window.getComputedStyle(uiState.ui.panel).width;
           var collapsedRailRight = uiState.ui.panel.querySelector('.tl-marker-rail').getBoundingClientRect().right;
-          assertEqual(document.body.classList.contains('tl-timeline-expanded'), true, 'collapsed timeline render should keep real-time wide layout enabled');
+          assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), true, 'collapsed timeline render should keep Voyager reading width enabled');
           var lateMain = document.createElement('main');
           var lateTarget = document.createElement('div');
           lateTarget.className = 'max-w-2xl';
           lateMain.appendChild(lateTarget);
           document.body.appendChild(lateMain);
           api.renderTimeline(uiState, markerActions);
-          assertEqual(lateTarget.classList.contains('tl-chat-width-expanded'), false, 'timeline render should not apply late layout targets');
+          assertEqual(lateTarget.classList.contains('tl-chat-width-expanded'), false, 'timeline render should not apply legacy late layout targets');
           api.applyLayout(uiState);
-          assertEqual(lateTarget.classList.contains('tl-chat-width-expanded'), true, 'explicit layout refresh should apply late layout targets independently of hover');
+          assertEqual(lateTarget.classList.contains('tl-chat-width-expanded'), false, 'explicit layout refresh should still avoid plain max-w targets');
           lateMain.remove();
           assertEqual(uiState.ui.panel.querySelectorAll('.tl-timeline-marker').length, 2, 'collapsed timeline should render only marker rail entries');
           assertEqual(uiState.ui.panel.querySelector('.tl-card') === null, true, 'minimal timeline should not render an expanded card');
@@ -773,6 +785,22 @@
             assertEqual(copiedFormulaText, '$x^2+y^2=z^2$', 'clicking inline KaTeX should copy wrapped LaTeX');
             assertEqual(document.querySelector('.tl-formula-copy-toast.show') !== null, true, 'formula copy should show a success toast');
 
+            copiedFormulaText = '';
+            displayFormula.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 130, clientY: 170 }));
+            await new Promise(function(resolve) { setTimeout(resolve, 0); });
+            assertEqual(copiedFormulaText, '$$\\int_0^1 x dx$$', 'clicking block KaTeX should copy display LaTeX delimiters');
+
+            copiedFormulaText = '';
+            var formulaRuntimeResponse = null;
+            assertEqual(api.handleRuntimeMessage({ type: 'tl-set-formula-copy-enabled', enabled: false }, {}, function(response) {
+              formulaRuntimeResponse = response;
+            }), true, 'popup formula-copy toggle message should be handled synchronously');
+            assertEqual(formulaRuntimeResponse.formulaCopyEnabled, false, 'formula-copy toggle should return the disabled state');
+            inlineFormula.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 120, clientY: 160 }));
+            await new Promise(function(resolve) { setTimeout(resolve, 0); });
+            assertEqual(copiedFormulaText, '', 'disabled formula copy should not write to the clipboard');
+
+            api.handleRuntimeMessage({ type: 'tl-set-formula-copy-enabled', enabled: true }, {}, function() {});
             copiedFormulaText = '';
             window.getSelection = function() { return { toString: function() { return 'selected formula text'; } }; };
             inlineFormula.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 120, clientY: 160 }));

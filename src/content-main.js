@@ -371,43 +371,73 @@
       state.activeGroupId = group.id;
       timeline.updateActiveClasses(state);
       locator.jumpToTurn(state, group.anchorTurn);
-    },
-    setLayoutMode: function(mode) {
-      applyLayoutMode(mode);
     }
   };
 
-  function savePopupLayoutMode(layoutMode) {
+  function savePopupSettings(settings) {
     if (!root.chrome || !root.chrome.storage || !root.chrome.storage.local || !root.chrome.storage.local.set) return;
     try {
-      root.chrome.storage.local.set({ tlLayoutMode: layoutMode });
+      root.chrome.storage.local.set(settings);
     } catch (error) {
       // Ignore extension storage failures; local page prefs still apply.
     }
   }
 
-  function applyLayoutMode(mode) {
-    const layoutMode = stateModule.normalizeLayoutMode(mode);
-    state.prefs.layoutMode = layoutMode;
+  function getPluginSettings() {
+    if (!state.prefs) state.prefs = stateModule.getDefaultPrefs();
+    return {
+      readingWidthEnabled: stateModule.normalizeBoolean(state.prefs.readingWidthEnabled, true),
+      readingWidthPx: stateModule.normalizeReadingWidth(state.prefs.readingWidthPx),
+      formulaCopyEnabled: stateModule.normalizeBoolean(state.prefs.formulaCopyEnabled, true)
+    };
+  }
+
+  function applyFormulaCopyEnabled(enabled) {
+    const nextEnabled = stateModule.normalizeBoolean(enabled, true);
+    state.prefs.formulaCopyEnabled = nextEnabled;
+    if (formulaCopy && formulaCopy.setEnabled) formulaCopy.setEnabled(nextEnabled);
     stateModule.savePrefs(state);
-    savePopupLayoutMode(layoutMode);
+    savePopupSettings({ tlFormulaCopyEnabled: nextEnabled });
+    return nextEnabled;
+  }
+
+  function applyReadingWidthEnabled(enabled) {
+    const nextEnabled = stateModule.normalizeBoolean(enabled, true);
+    state.prefs.readingWidthEnabled = nextEnabled;
+    stateModule.savePrefs(state);
     if (layout) layout.applyLayout(state);
-    timeline.render(state, actions);
-    return layoutMode;
+    savePopupSettings({ tlReadingWidthEnabled: nextEnabled });
+    return nextEnabled;
+  }
+
+  function applyReadingWidthPx(widthPx) {
+    const nextWidth = stateModule.normalizeReadingWidth(widthPx);
+    state.prefs.readingWidthPx = nextWidth;
+    stateModule.savePrefs(state);
+    if (layout) layout.applyLayout(state);
+    savePopupSettings({ tlReadingWidthPx: nextWidth });
+    return nextWidth;
   }
 
   function handleRuntimeMessage(message, sender, sendResponse) {
     if (!message || !message.type) return false;
-    if (message.type === 'tl-get-layout-mode') {
-      if (sendResponse) sendResponse({
-        ok: true,
-        layoutMode: stateModule.normalizeLayoutMode(state.prefs && state.prefs.layoutMode)
-      });
+    if (message.type === 'tl-get-plugin-settings') {
+      if (sendResponse) sendResponse(Object.assign({ ok: true }, getPluginSettings()));
       return true;
     }
-    if (message.type === 'tl-set-layout-mode') {
-      const layoutMode = applyLayoutMode(message.layoutMode);
-      if (sendResponse) sendResponse({ ok: true, layoutMode: layoutMode });
+    if (message.type === 'tl-set-reading-width') {
+      const readingWidthPx = applyReadingWidthPx(message.readingWidthPx);
+      if (sendResponse) sendResponse(Object.assign({ ok: true }, getPluginSettings(), { readingWidthPx: readingWidthPx }));
+      return true;
+    }
+    if (message.type === 'tl-set-reading-width-enabled') {
+      const readingWidthEnabled = applyReadingWidthEnabled(message.enabled);
+      if (sendResponse) sendResponse(Object.assign({ ok: true }, getPluginSettings(), { readingWidthEnabled: readingWidthEnabled }));
+      return true;
+    }
+    if (message.type === 'tl-set-formula-copy-enabled') {
+      const formulaCopyEnabled = applyFormulaCopyEnabled(message.enabled);
+      if (sendResponse) sendResponse(Object.assign({ ok: true }, getPluginSettings(), { formulaCopyEnabled: formulaCopyEnabled }));
       return true;
     }
     return false;
@@ -451,9 +481,13 @@
     getConversationObserverConfig: getConversationObserverConfig,
     shouldIgnoreMutationBatch: shouldIgnoreMutationBatch,
     getDefaultPrefs: stateModule.getDefaultPrefs,
-    normalizeLayoutMode: stateModule.normalizeLayoutMode,
+    normalizeReadingWidth: stateModule.normalizeReadingWidth,
     savePrefs: stateModule.savePrefs,
     handleRuntimeMessage: handleRuntimeMessage,
+    getPluginSettings: getPluginSettings,
+    applyReadingWidthEnabled: applyReadingWidthEnabled,
+    applyReadingWidthPx: applyReadingWidthPx,
+    applyFormulaCopyEnabled: applyFormulaCopyEnabled,
     formulaCopy: formulaCopy
   };
 
@@ -471,6 +505,7 @@
   if (root.chrome && root.chrome.runtime && root.chrome.runtime.onMessage && root.chrome.runtime.onMessage.addListener) {
     root.chrome.runtime.onMessage.addListener(handleRuntimeMessage);
   }
+  if (formulaCopy && formulaCopy.setEnabled) formulaCopy.setEnabled(getPluginSettings().formulaCopyEnabled);
   if (formulaCopy && formulaCopy.initialize) formulaCopy.initialize();
   hookHistory();
   if (root.document.readyState === 'loading') {

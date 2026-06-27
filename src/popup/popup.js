@@ -1,42 +1,79 @@
 (function(root) {
-  const STORAGE_KEY = 'tlLayoutMode';
-  const MODES = ['default', 'comfortable', 'wide', 'full'];
+  const DEFAULTS = {
+    readingWidthEnabled: true,
+    readingWidthPx: 1276,
+    formulaCopyEnabled: true
+  };
+  const MIN_READING_WIDTH = 600;
+  const MAX_READING_WIDTH = 1600;
 
-  function normalizeLayoutMode(mode) {
-    return MODES.indexOf(mode) >= 0 ? mode : 'wide';
+  function normalizeBoolean(value, fallback) {
+    if (value === true || value === false) return value;
+    return fallback;
   }
 
-  function getButtons() {
-    return Array.prototype.slice.call(root.document.querySelectorAll('[data-layout-mode]'));
+  function normalizeReadingWidth(value) {
+    const width = Math.round(Number(value) || DEFAULTS.readingWidthPx);
+    return Math.max(MIN_READING_WIDTH, Math.min(MAX_READING_WIDTH, width));
   }
 
-  function setActiveMode(mode) {
-    const normalized = normalizeLayoutMode(mode);
-    getButtons().forEach(function(button) {
-      button.classList.toggle('is-active', button.getAttribute('data-layout-mode') === normalized);
-    });
+  function normalizeSettings(settings) {
+    const source = settings || {};
+    return {
+      readingWidthEnabled: normalizeBoolean(source.readingWidthEnabled, DEFAULTS.readingWidthEnabled),
+      readingWidthPx: normalizeReadingWidth(source.readingWidthPx),
+      formulaCopyEnabled: normalizeBoolean(source.formulaCopyEnabled, DEFAULTS.formulaCopyEnabled)
+    };
   }
 
-  function getStoredMode(callback) {
+  function getControls() {
+    return {
+      formulaCopyToggle: root.document.getElementById('tl-formula-copy-toggle'),
+      readingWidthToggle: root.document.getElementById('tl-reading-width-toggle'),
+      readingWidthSlider: root.document.getElementById('tl-reading-width-slider'),
+      readingWidthValue: root.document.getElementById('tl-reading-width-value')
+    };
+  }
+
+  function setControls(settings) {
+    const normalized = normalizeSettings(settings);
+    const controls = getControls();
+    if (controls.formulaCopyToggle) controls.formulaCopyToggle.checked = normalized.formulaCopyEnabled;
+    if (controls.readingWidthToggle) controls.readingWidthToggle.checked = normalized.readingWidthEnabled;
+    if (controls.readingWidthSlider) {
+      controls.readingWidthSlider.value = String(normalized.readingWidthPx);
+      controls.readingWidthSlider.disabled = !normalized.readingWidthEnabled;
+    }
+    if (controls.readingWidthValue) controls.readingWidthValue.textContent = String(normalized.readingWidthPx);
+  }
+
+  function getStoredSettings(callback) {
     if (!root.chrome || !root.chrome.storage || !root.chrome.storage.local || !root.chrome.storage.local.get) {
-      callback('wide');
+      callback(DEFAULTS);
       return;
     }
     try {
-      root.chrome.storage.local.get(STORAGE_KEY, function(result) {
-        callback(normalizeLayoutMode(result && result[STORAGE_KEY]));
+      root.chrome.storage.local.get(['tlReadingWidthEnabled', 'tlReadingWidthPx', 'tlFormulaCopyEnabled'], function(result) {
+        callback(normalizeSettings({
+          readingWidthEnabled: result && result.tlReadingWidthEnabled,
+          readingWidthPx: result && result.tlReadingWidthPx,
+          formulaCopyEnabled: result && result.tlFormulaCopyEnabled
+        }));
       });
     } catch (error) {
-      callback('wide');
+      callback(DEFAULTS);
     }
   }
 
-  function saveStoredMode(mode) {
+  function saveStoredSettings(settings) {
     if (!root.chrome || !root.chrome.storage || !root.chrome.storage.local || !root.chrome.storage.local.set) return;
     try {
-      const payload = {};
-      payload[STORAGE_KEY] = normalizeLayoutMode(mode);
-      root.chrome.storage.local.set(payload);
+      const normalized = normalizeSettings(settings);
+      root.chrome.storage.local.set({
+        tlReadingWidthEnabled: normalized.readingWidthEnabled,
+        tlReadingWidthPx: normalized.readingWidthPx,
+        tlFormulaCopyEnabled: normalized.formulaCopyEnabled
+      });
     } catch (error) {
       // Ignore storage errors; the active tab message is the primary action.
     }
@@ -64,21 +101,60 @@
   }
 
   function initialize() {
-    getButtons().forEach(function(button) {
-      button.addEventListener('click', function() {
-        const mode = normalizeLayoutMode(button.getAttribute('data-layout-mode'));
-        setActiveMode(mode);
-        saveStoredMode(mode);
-        sendToActiveTab({ type: 'tl-set-layout-mode', layoutMode: mode }, function(response) {
-          if (response && response.ok) setActiveMode(response.layoutMode);
+    const controls = getControls();
+
+    if (controls.formulaCopyToggle) {
+      controls.formulaCopyToggle.addEventListener('change', function() {
+        const enabled = !!controls.formulaCopyToggle.checked;
+        sendToActiveTab({ type: 'tl-set-formula-copy-enabled', enabled: enabled }, function(response) {
+          const settings = response && response.ok ? response : Object.assign({}, DEFAULTS, { formulaCopyEnabled: enabled });
+          setControls(settings);
+          saveStoredSettings(settings);
         });
       });
-    });
+    }
 
-    getStoredMode(function(storedMode) {
-      setActiveMode(storedMode);
-      sendToActiveTab({ type: 'tl-get-layout-mode' }, function(response) {
-        if (response && response.ok) setActiveMode(response.layoutMode);
+    if (controls.readingWidthToggle) {
+      controls.readingWidthToggle.addEventListener('change', function() {
+        const enabled = !!controls.readingWidthToggle.checked;
+        sendToActiveTab({ type: 'tl-set-reading-width-enabled', enabled: enabled }, function(response) {
+          const settings = response && response.ok ? response : Object.assign({}, DEFAULTS, {
+            readingWidthEnabled: enabled,
+            readingWidthPx: controls.readingWidthSlider ? controls.readingWidthSlider.value : DEFAULTS.readingWidthPx
+          });
+          setControls(settings);
+          saveStoredSettings(settings);
+        });
+      });
+    }
+
+    if (controls.readingWidthSlider) {
+      controls.readingWidthSlider.addEventListener('input', function() {
+        const width = normalizeReadingWidth(controls.readingWidthSlider.value);
+        setControls({
+          readingWidthEnabled: controls.readingWidthToggle ? controls.readingWidthToggle.checked : true,
+          readingWidthPx: width,
+          formulaCopyEnabled: controls.formulaCopyToggle ? controls.formulaCopyToggle.checked : true
+        });
+        sendToActiveTab({ type: 'tl-set-reading-width', readingWidthPx: width }, function(response) {
+          const settings = response && response.ok ? response : Object.assign({}, DEFAULTS, {
+            readingWidthEnabled: controls.readingWidthToggle ? controls.readingWidthToggle.checked : true,
+            readingWidthPx: width,
+            formulaCopyEnabled: controls.formulaCopyToggle ? controls.formulaCopyToggle.checked : true
+          });
+          setControls(settings);
+          saveStoredSettings(settings);
+        });
+      });
+    }
+
+    getStoredSettings(function(storedSettings) {
+      setControls(storedSettings);
+      sendToActiveTab({ type: 'tl-get-plugin-settings' }, function(response) {
+        if (response && response.ok) {
+          setControls(response);
+          saveStoredSettings(response);
+        }
       });
     });
   }

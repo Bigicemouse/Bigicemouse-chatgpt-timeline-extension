@@ -25,8 +25,9 @@ src/ui/geometry.js         — Map DOM turn positions to timeline marker Y coord
 src/navigation/locator.js  — Scroll spy, active group detection, jump-to-turn
 src/ui/styles.js           — Inject/remove CSS via <style> element (light + dark CSS variables)
 src/ui/layout.js           — Expand chat content width when timeline is active (CSS class toggle)
+src/ui/virtual-list.js     — Virtual list window calculation for long hover previews
 src/ui/timeline.js         — Render marker rail + hover preview card (collapsed-only mode)
-src/features/export.js     — Markdown/JSON conversation export
+src/features/formula-copy.js — LaTeX formula click-to-copy from KaTeX/MathJax elements
 src/content-main.js        — Orchestrator: hooks history.pushState, starts MutationObserver
 ```
 

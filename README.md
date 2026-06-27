@@ -13,6 +13,8 @@ Current version: **v2.00**
 - Falls back to rendered DOM collection when the API is unavailable.
 - Shows a minimal fixed right-side rail with clickable timeline markers.
 - Expands a scrollable hover preview with all question groups for long conversations.
+- Adjustable reading width (600px-1600px) via popup slider.
+- LaTeX formula click-to-copy from KaTeX/MathJax elements.
 
 ## Latest Update
 
@@ -23,6 +25,8 @@ Version **v2.00** focuses on a compact screenshot-matched hover card and a smoot
 - Uses native scrolling for medium-length previews and a virtual list window for very long conversations.
 - Reduces streaming refresh pressure by ignoring `characterData` mutations and timeline-owned DOM updates.
 - Keeps the collapsed rail short by sampling up to five marker ticks instead of rendering a full-height scrollbar-like rail.
+- New popup UI with toggle switches for reading width and formula copy features.
+- Adjustable reading width slider (600px-1600px) with real-time preview.
 
 Read the full update note: [Timeline UI and Performance Update](docs/2026-04-28-timeline-ui-performance-update.md).
 
@@ -56,6 +60,9 @@ Use it as a release asset or extract it and load the extracted folder as an unpa
 - `src/data/conversation-api.js` - conversation API fetch and mapping parsing.
 - `src/ui/timeline.js` - fixed rail and hover preview rendering.
 - `src/ui/styles.js` - injected timeline styles.
+- `src/ui/layout.js` - reading width layout control.
+- `src/features/formula-copy.js` - LaTeX formula click-to-copy.
+- `src/popup/popup.js` - popup settings UI.
 - `src/content-main.js` - content script orchestrator.
 
 ---
@@ -75,6 +82,8 @@ Use it as a release asset or extract it and load the extracted folder as an unpa
 - 当 API 不可用时，仍保留页面 DOM 读取作为降级方案。
 - 右侧固定极简时间线轨道，支持点击 marker 跳转到对应问题。
 - 鼠标悬浮时展开可滚动预览卡片，长对话会显示全部问题组。
+- 可调整阅读宽度（600px-1600px），通过弹窗滑块控制。
+- LaTeX 公式点击复制，支持 KaTeX 和 MathJax 元素。
 
 ## 最新更新
 
@@ -85,6 +94,8 @@ Use it as a release asset or extract it and load the extracted folder as an unpa
 - 中等长度对话使用原生滚动，超长对话才启用虚拟列表窗口，减少 DOM 节点。
 - MutationObserver 不再监听 `characterData`，并忽略时间线自身 DOM 更新，降低流式输出期间的刷新压力。
 - 右侧折叠 rail 保持短节点栈，最多采样 5 个 marker，避免变成长滚动条样式。
+- 弹窗 UI 改为开关控制，支持阅读宽度和公式复制功能的独立开关。
+- 阅读宽度滑块（600px-1600px）支持实时预览。
 
 完整更新说明：[Timeline UI and Performance Update](docs/2026-04-28-timeline-ui-performance-update.md)。
 
@@ -109,7 +120,7 @@ Use it as a release asset or extract it and load the extracted folder as an unpa
 packages/chatgpt-timeline-extension-v2.00.zip
 ```
 
-可以把它作为 GitHub Release 附件使用，也可以解压后按“加载已解压的扩展程序”的方式安装。
+可以把它作为 GitHub Release 附件使用，也可以解压后按"加载已解压的扩展程序"的方式安装。
 
 ## 项目结构
 
@@ -118,6 +129,9 @@ packages/chatgpt-timeline-extension-v2.00.zip
 - `src/data/conversation-api.js` - 对话 API 请求和 mapping 解析。
 - `src/ui/timeline.js` - 右侧轨道和悬浮预览渲染。
 - `src/ui/styles.js` - 注入式时间线样式。
+- `src/ui/layout.js` - 阅读宽度布局控制。
+- `src/features/formula-copy.js` - LaTeX 公式点击复制。
+- `src/popup/popup.js` - 弹窗设置 UI。
 - `src/content-main.js` - content script 主流程编排。
 
 ## 近期工作总结（v2.00 / 2026-04-28）
@@ -140,12 +154,23 @@ packages/chatgpt-timeline-extension-v2.00.zip
 - active marker 更新只 patch class，不触发完整 UI 重绘。
 - MutationObserver 不再监听 `characterData`，并忽略时间线自身 DOM 变化，减少流式输出期间的刷新压力。
 
+### 新增功能
+
+- **阅读宽度控制**：通过 popup 滑块调整聊天内容宽度（600px-1600px），支持实时预览。
+- **公式复制**：点击 KaTeX/MathJax 公式即可复制 LaTeX 源码。
+- **弹窗 UI**：新开关控制阅读宽度和公式复制功能的启用/禁用。
+
 ### 涉及文件
 
 - `src/ui/virtual-list.js`
 - `src/ui/timeline.js`
 - `src/ui/styles.js`
+- `src/ui/layout.js`
 - `src/navigation/locator.js`
+- `src/features/formula-copy.js`
+- `src/popup/popup.js`
+- `src/popup/popup.html`
+- `src/popup/popup.css`
 - `src/content-main.js`
 - `src/core/state.js`
 - `manifest.json`
