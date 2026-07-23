@@ -57,7 +57,9 @@
       }
       body.gv-plugin-chatgpt-readable [class*='--thread-content-max-width']{
         --thread-content-max-width:var(--gv-plugin-reading-width, 1276px) !important;
+        width:min(var(--gv-plugin-reading-width, 1276px), 100%) !important;
         max-width:var(--gv-plugin-reading-width, 1276px) !important;
+        margin-inline:auto !important;
       }
       #${CONSTANTS.PANEL_ID}{
         position:fixed;

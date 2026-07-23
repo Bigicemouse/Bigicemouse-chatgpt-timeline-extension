@@ -59,12 +59,12 @@
     return Number.isNaN(parsed) ? fallbackIndex : parsed;
   }
 
-  function detectRole(section, index) {
+  function detectRole(section) {
     const explicitUser = selfOrQuery(section, '[data-message-author-role="user"]');
     const explicitAssistant = selfOrQuery(section, '[data-message-author-role="assistant"]');
     if (explicitUser && !explicitAssistant) return 'u';
     if (explicitAssistant && !explicitUser) return 'a';
-    return getTurnSortIndex(section, index + 1) % 2 === 1 ? 'u' : 'a';
+    return '';
   }
 
   function removeNoiseNodes(clone) {
@@ -153,7 +153,8 @@
       return /conversation-turn-\d+/.test(getTurnTestId(section));
     });
     (sections || []).forEach(function(section, index) {
-      const role = detectRole(section, index);
+      const role = detectRole(section);
+      if (!role) return;
       const text = extractTurnText(section, role);
       const sortIndex = hasOnlyExplicitTurnIndexes ? getTurnSortIndex(section, index + 1) : index + 1;
       const domTurnId = getStableDomTurnId(section, role, text, index + 1);
