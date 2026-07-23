@@ -273,13 +273,17 @@
           fallbackTurn.setAttribute('data-message-author-role', 'assistant');
           fallbackTurn.setAttribute('data-message-id', 'fallback-message-id');
           fallbackTurn.innerHTML = '<div class="markdown">Fallback assistant text</div>';
+          var transientThinkingTurn = document.createElement('section');
+          transientThinkingTurn.setAttribute('data-testid', 'conversation-turn-13');
+          transientThinkingTurn.textContent = '正在思考';
           domHost.appendChild(topLevelTurn);
           domHost.appendChild(fallbackTurn);
+          domHost.appendChild(transientThinkingTurn);
           document.body.appendChild(domHost);
           var collectedSections = api.collectTurnSections(domHost);
-          assertEqual(collectedSections.length, 2, 'DOM collector should use Voyager-style selector fallback and ignore nested turns');
+          assertEqual(collectedSections.length, 3, 'DOM collector should find Voyager-style turns while ignoring nested turns');
           var voyagerDomTurns = api.collectTurnsFromSections(collectedSections);
-          assertEqual(voyagerDomTurns.length, 2, 'DOM collector should turn top-level fallback sections into turns');
+          assertEqual(voyagerDomTurns.length, 2, 'DOM collector should ignore transient turn shells without an explicit message role');
           assertEqual(voyagerDomTurns[0].text, 'Visible user text', 'DOM text extraction should strip hidden text and extension UI');
           assertEqual(voyagerDomTurns[1].apiMessageId, 'fallback-message-id', 'DOM collector should keep message ids from fallback selectors');
           domHost.remove();
@@ -397,18 +401,26 @@
           var nativeMaxTarget = document.createElement('div');
           var threadWidthTarget = document.createElement('div');
           var imageTarget = document.createElement('img');
+          wideMain.style.width = '1600px';
           nativeMaxTarget.className = 'max-w-3xl';
           threadWidthTarget.className = 'max-w-(--thread-content-max-width)';
+          threadWidthTarget.style.width = '100%';
           threadWidthTarget.appendChild(imageTarget);
           wideMain.appendChild(nativeMaxTarget);
           wideMain.appendChild(threadWidthTarget);
           document.body.appendChild(wideMain);
+          window.TLTimelineModules.styles.ensureStyle();
           api.applyLayout(layoutState);
           assertEqual(document.body.classList.contains('gv-plugin-chatgpt-readable'), true, 'initialized conversation should enable the Voyager readable body class');
           assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '1276px', 'reading width should be stored as a body CSS variable');
           assertEqual(nativeMaxTarget.classList.contains('tl-chat-width-expanded'), false, 'plain max-w containers should not be marked or widened');
           assertEqual(imageTarget.classList.contains('tl-chat-width-expanded'), false, 'image elements should not be marked or resized by layout logic');
           assertEqual(threadWidthTarget.classList.contains('tl-chat-width-expanded'), false, 'Voyager layout should not add legacy width marker classes');
+          assertEqual(
+            Math.round(threadWidthTarget.getBoundingClientRect().left - wideMain.getBoundingClientRect().left),
+            162,
+            'reading width target should center inside a wider chat container'
+          );
           layoutState.prefs.readingWidthPx = 1120;
           api.applyLayout(layoutState);
           assertEqual(document.body.style.getPropertyValue('--gv-plugin-reading-width'), '1120px', 'reading width should update from preferences');
@@ -490,6 +502,7 @@
           assertMatch(styleText, /\.tl-timeline-marker\{[\s\S]*width:44px;[\s\S]*height:22px/, 'collapsed nodes should use short horizontal hit areas, not a long rail');
           assertMatch(styleText, /\.tl-timeline-marker\.tl-marker-active::after,[\s\S]*width:34px;[\s\S]*height:4px/, 'current node should be a blue short horizontal line');
           assertMatch(styleText, /body\.gv-plugin-chatgpt-readable \[class\*='--thread-content-max-width'\]\{[\s\S]*--thread-content-max-width:var\(--gv-plugin-reading-width, 1276px\)/, 'reading width should use the Voyager thread-content CSS variable selector');
+          assertMatch(styleText, /body\.gv-plugin-chatgpt-readable \[class\*='--thread-content-max-width'\]\{[\s\S]*margin-inline:auto !important/, 'reading width containers should stay centered in the available chat area');
           assertEqual(/tl-chat-width-expanded img|tl-layout-comfortable|tl-layout-wide|tl-layout-full/.test(styleText), false, 'reading width CSS should not keep legacy broad image or layout overrides');
           assertMatch(styleText, /max-height:min\(224px/, 'hover preview card should stay small');
           assertMatch(styleText, /\.tl-hover-card\{[\s\S]*scrollbar-width:none/, 'hover preview card should not show a scrollbar slider');
