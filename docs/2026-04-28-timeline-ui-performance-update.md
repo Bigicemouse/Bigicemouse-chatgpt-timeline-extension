@@ -1,9 +1,9 @@
 # Timeline UI and Performance Update
 
-Date: 2026-04-28
-Version: v2.00
+Date: 2026-06-30
+Version: v2.01
 
-This v2.00 update improves the ChatGPT Timeline Navigator hover preview for real long conversations. It focuses on three practical issues: matching the compact screenshot-style hover card, keeping the collapsed rail visually short, and fixing the 19+ conversation freeze where the preview list could become hard to scroll or click.
+This v2.01 update packages the timeline hover-card work already merged to `main` together with the 2026-06-27 popup controls, LaTeX formula copy, and adjustable reading-width changes. It keeps the compact screenshot-style hover card from v2.00 and adds user-facing controls for the new convenience features.
 
 ## What Changed
 
@@ -17,6 +17,9 @@ This v2.00 update improves the ChatGPT Timeline Navigator hover preview for real
 - Preview list scrolling no longer rebuilds the entire hover card.
 - Timeline-owned DOM mutations are ignored by the conversation observer.
 - Streaming assistant text no longer triggers refresh through `characterData` mutation events.
+- The extension action now opens a popup with toggles for formula copy and comfortable reading width.
+- The reading-width slider supports 600px-1600px and updates the Voyager thread-content width without resizing images.
+- Clicking KaTeX or MathJax formulas copies LaTeX with inline or display delimiters.
 
 ## Why It Matters
 
@@ -33,6 +36,9 @@ The new behavior keeps the outer UI stable. The right-side rail, hover card, and
 - The old search, role filtering, selection mode, width control, Markdown export, and PDF export controls are intentionally absent from the hover card.
 - Clicking a row title jumps to the matching conversation group.
 - A 19-row conversation preview can be scrolled to the bottom and the 19th item remains clickable.
+- The popup can turn formula copying on or off.
+- The popup can turn comfortable reading width on or off and adjust the width.
+- Formula copy shows a small success or failure toast near the clicked formula.
 
 ## Implementation Notes
 
@@ -40,6 +46,9 @@ The new behavior keeps the outer UI stable. The right-side rail, hover card, and
 - `src/ui/virtual-list.js` provides the virtual window calculation used for very long previews.
 - `src/ui/styles.js` defines the compact dark card, blue/gray marker colors, short rail geometry, hidden scrollbars, and 42px row layout.
 - `src/content-main.js` removes `characterData` observation for the conversation observer and filters timeline-owned mutations.
+- `src/popup/*` implements the extension popup controls and persists settings through `chrome.storage.local`.
+- `src/features/formula-copy.js` extracts LaTeX from KaTeX/MathJax elements and copies it through the Clipboard API or a legacy fallback.
+- `src/ui/layout.js` applies the readable-width class and CSS variable to Voyager thread-content containers.
 - `content-script.test.html` includes regression coverage for the screenshot palette and dimensions, 19-row scroll/click behavior, 300-row virtual rendering, rail click mapping, formula copy, popup layout messaging, and observer configuration.
 
 ## Validation
@@ -75,10 +84,10 @@ That failure happens before project code is parsed.
 
 # 时间线 UI 与性能更新
 
-日期：2026-04-28
-版本：v2.00
+日期：2026-06-30
+版本：v2.01
 
-本次 v2.00 更新主要优化 ChatGPT Timeline Navigator 在真实长对话中的悬浮预览体验，重点解决三个问题：对齐当前截图风格的紧凑 hover 卡片、让折叠 rail 保持短节点栈，以及 19 条以上对话时预览列表滚动、点击变卡的问题。
+本次 v2.01 发布打包已经进入 `main` 的时间线 hover 卡片工作，以及 2026-06-27 合入的 popup 控件、LaTeX 公式复制和可调整阅读宽度改动。它保留 v2.00 的紧凑截图风格 hover 卡片，并补上这些新增便利功能的用户入口。
 
 ## 更新内容
 
@@ -92,6 +101,9 @@ That failure happens before project code is parsed.
 - 预览列表滚动不再重建整个 hover card。
 - conversation observer 会忽略时间线自身 DOM 变化。
 - assistant 流式文本变化不再通过 `characterData` mutation 触发刷新。
+- 扩展 action 现在打开 popup，可切换公式复制和舒适阅读宽度。
+- 阅读宽度滑块支持 600px-1600px，只更新 Voyager 文本容器宽度，不拉伸图片。
+- 点击 KaTeX 或 MathJax 公式会复制带 inline/display 定界符的 LaTeX。
 
 ## 改进原因
 
@@ -108,6 +120,9 @@ That failure happens before project code is parsed.
 - 旧搜索、角色筛选、选择模式、宽度控制、Markdown 导出、PDF 导出控件不再出现在 hover 卡片里。
 - 点击行标题会跳转到对应对话组。
 - 19 条对话预览可以滚动到底部，并且第 19 条仍可点击。
+- popup 可以开启或关闭公式复制。
+- popup 可以开启或关闭舒适阅读宽度，并调整具体宽度。
+- 公式复制会在点击位置附近显示复制成功或失败提示。
 
 ## 实现说明
 
@@ -115,6 +130,9 @@ That failure happens before project code is parsed.
 - `src/ui/virtual-list.js` 提供超长预览列表的窗口计算。
 - `src/ui/styles.js` 定义紧凑深色卡片、蓝/灰 marker、短 rail 几何、隐藏滚动条和 42px 行布局。
 - `src/content-main.js` 移除 conversation observer 的 `characterData` 监听，并过滤时间线自身 DOM 变化。
+- `src/popup/*` 实现扩展 popup 控件，并通过 `chrome.storage.local` 持久化设置。
+- `src/features/formula-copy.js` 从 KaTeX / MathJax 元素提取 LaTeX，并通过 Clipboard API 或旧式 fallback 复制。
+- `src/ui/layout.js` 对 Voyager 文本容器应用可读宽度 class 和 CSS 变量。
 - `content-script.test.html` 覆盖截图配色和尺寸、19 条滚动点击、300 条虚拟列表、rail 空白点击映射、公式复制、popup 宽度消息和 observer 配置回归测试。
 
 ## 验证记录

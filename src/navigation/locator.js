@@ -31,6 +31,8 @@
   }
 
   function findScrollTarget() {
+    const conversationRoot = domCollector.getConversationRoot();
+    if (conversationRoot && conversationRoot !== root.document) return conversationRoot;
     const documentTarget = root.document.scrollingElement || root.document.documentElement || root.document.body;
     const candidates = [];
     let element = utils.qs('main');
@@ -61,14 +63,15 @@
     return best || documentTarget;
   }
 
-  function findVisibleDomTurn(turn) {
-    let match = null;
-    domCollector.collectTurns().forEach(function(domTurn) {
-      const sameId = turn.apiMessageId && domTurn.apiMessageId && turn.apiMessageId === domTurn.apiMessageId;
-      const sameText = utils.getTurnTextKey(turn) && utils.getTurnTextKey(turn) === utils.getTurnTextKey(domTurn);
-      if (!match && (sameId || sameText)) match = domTurn;
-    });
-    return match;
+  function findVisibleDomTurn(turn, turns) {
+    const exact = domCollector.findTurnElement(turn);
+    if (exact) return Object.assign({}, turn, { el: exact, seenInCurrentDom: true });
+    // Identified messages must not fall back to an unrelated repeated prompt.
+    if (turn.apiMessageId && domCollector.getConversationRoot() !== root.document) return null;
+    const sources = turns && turns.indexOf(turn) >= 0 ? turns : [turn];
+    const matches = domCollector.attachDomElementsToTurns(sources, domCollector.collectTurns());
+    const match = matches[sources.indexOf(turn)];
+    return match && match.el ? match : null;
   }
 
   function highlightTurn(state, target) {
@@ -89,32 +92,68 @@
   function scrollVisibleTurnIntoView(state, turn, domTurn) {
     if (!domTurn || !domTurn.el || !domTurn.el.scrollIntoView) return false;
     turn.el = domTurn.el;
-    domTurn.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    domTurn.el.scrollIntoView({ behavior: 'instant', block: 'start' });
+    state.anchorGeometryCache = null;
     highlightTurn(state, domTurn.el);
     return true;
   }
 
-  function locateTurnAfterEstimatedScroll(state, turn) {
-    const match = findVisibleDomTurn(turn);
-    scrollVisibleTurnIntoView(state, turn, match);
-  }
-
   function jumpToTurn(state, turn) {
-    const visibleMatch = findVisibleDomTurn(turn);
+    if (state.locateTimer) root.clearTimeout(state.locateTimer);
+    state.locateTimer = null;
+    const visibleMatch = findVisibleDomTurn(turn, state.turns);
+    const routeToken = state.routeToken;
+    const conversationId = state.conversationId;
+    const jumpToken = state.jumpToken = (state.jumpToken || 0) + 1;
+    const alreadyFound = scrollVisibleTurnIntoView(state, turn, visibleMatch);
+    // An exact mounted target needs one scroll only. Rechecking it every 260 ms
+    // forces layout and can fight the user's next scroll or next marker click.
+    if (alreadyFound) return;
     const target = findScrollTarget();
     const metrics = getMetrics(target);
-    const totalTurns = Math.max(state.turns.length, turn.sortIndex || 1, 1);
-    const ratio = totalTurns > 1 ? (Math.max(1, turn.sortIndex || 1) - 1) / (totalTurns - 1) : 0;
+    const index = Math.max(0, state.turns.findIndex(function(item) { return item.id === turn.id; }));
+    const ratio = state.turns.length > 1 ? index / (state.turns.length - 1) : 0;
     const estimatedTop = utils.clamp(Math.round(metrics.maxTop * ratio - metrics.clientHeight * 0.28), 0, metrics.maxTop);
 
-    if (scrollVisibleTurnIntoView(state, turn, visibleMatch)) return;
     if (!target) return;
     target.scrollTop = estimatedTop;
-    if (state.locateTimer) root.clearTimeout(state.locateTimer);
-    state.locateTimer = root.setTimeout(function() {
+    let attempts = 0;
+    let low = 0;
+    let high = metrics.maxTop;
+    let lastHeight = metrics.scrollHeight;
+    function settle() {
       state.locateTimer = null;
-      locateTurnAfterEstimatedScroll(state, turn);
-    }, CONSTANTS.JUMP_SETTLE_DELAY_MS);
+      if (state.routeToken !== routeToken || state.conversationId !== conversationId || state.jumpToken !== jumpToken) return;
+      attempts += 1;
+      const match = findVisibleDomTurn(turn, state.turns);
+      if (match) {
+        scrollVisibleTurnIntoView(state, turn, match);
+        return;
+      } else {
+        // Virtualized pages can mount only a window of turns. Bound the search by
+        // known message order instead of assuming equally sized answers.
+        const nextMetrics = getMetrics(target);
+        if (lastHeight !== nextMetrics.scrollHeight) {
+          low = 0;
+          high = nextMetrics.maxTop;
+          lastHeight = nextMetrics.scrollHeight;
+        }
+        const renderedIds = new Set();
+        utils.qsa('[data-chatgpt-search-message-ids]', domCollector.getConversationRoot()).forEach(function(node) {
+          String(node.getAttribute('data-chatgpt-search-message-ids') || '').split(/\s+/).forEach(function(id) { renderedIds.add(id); });
+        });
+        const indexes = [];
+        state.turns.forEach(function(item, position) { if (renderedIds.has(item.apiMessageId)) indexes.push(position); });
+        if (indexes.length) {
+          if (index < indexes[0]) high = nextMetrics.scrollTop;
+          else if (index > indexes[indexes.length - 1]) low = nextMetrics.scrollTop;
+          else return;
+          target.scrollTop = (low + high) / 2;
+        }
+      }
+      if (attempts < 10) state.locateTimer = root.setTimeout(settle, CONSTANTS.JUMP_SETTLE_DELAY_MS);
+    }
+    state.locateTimer = root.setTimeout(settle, CONSTANTS.JUMP_SETTLE_DELAY_MS);
   }
 
   function computeActiveGroupId(state) {
@@ -131,17 +170,9 @@
     return activeId;
   }
 
-  function buildGroupSignature(groups) {
-    return (groups || []).map(function(group) {
-      const anchor = group && group.anchorTurn;
-      return [group && group.id, group && group.index, anchor && anchor.id, anchor && anchor.sortIndex].join(':');
-    }).join('|');
-  }
-
   function getCachedAnchorEntries(state, scrollTarget) {
-    const signature = buildGroupSignature(state.groups);
     const cache = state.anchorGeometryCache;
-    if (cache && cache.signature === signature && cache.scrollTarget === scrollTarget) {
+    if (cache && cache.groups === state.groups && cache.scrollTarget === scrollTarget && cache.scrollHeight === scrollTarget.scrollHeight) {
       return cache.entries || [];
     }
 
@@ -161,7 +192,8 @@
     });
 
     state.anchorGeometryCache = {
-      signature: signature,
+      groups: state.groups,
+      scrollHeight: scrollTarget.scrollHeight,
       scrollTarget: scrollTarget,
       entries: entries
     };

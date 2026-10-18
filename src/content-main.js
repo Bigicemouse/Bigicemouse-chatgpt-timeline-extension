@@ -15,7 +15,9 @@
   const CONVERSATION_OBSERVER_CONFIG = {
     childList: true,
     subtree: true,
-    characterData: false
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['aria-label', 'data-testid']
   };
   const REFRESH_DEBOUNCE_MS = 220;
   const STREAMING_REFRESH_DEBOUNCE_MS = 1000;
@@ -91,9 +93,12 @@
   }
 
   function applyTurns(sourceTurns, force) {
-    const nextTurns = utils.mergeTurnsById(state.turns, sourceTurns);
+    const nextTurns = utils.mergeTurnsById([], sourceTurns);
     const signature = utils.buildConversationSignature(nextTurns);
-    if (!force && signature === state.lastSignature) return false;
+    const sameElements = nextTurns.length === state.turns.length && nextTurns.every(function(turn, index) {
+      return turn.el === state.turns[index].el;
+    });
+    if (!force && signature === state.lastSignature && sameElements) return false;
 
     state.turns = nextTurns;
     state.groups = utils.buildQaGroups(nextTurns);
@@ -106,6 +111,7 @@
 
   function refreshFromDom(force, routeToken, conversationId) {
     if (routeToken && !isRouteCurrent(state, routeToken, conversationId)) return false;
+    bindScrollSpy();
     if (!state.domCollectionReady) {
       if (state.apiTurns.length || force) return applyTurns(state.apiTurns, !!force);
       return false;
@@ -113,8 +119,20 @@
     state.domTurns = dom.collectTurns();
     state.domTurnCache = dom.cacheDomTurns(state.domTurnCache, state.domTurns);
     const cachedDomTurns = dom.attachDomElementsToTurns(state.domTurnCache, state.domTurns);
-    const mergedSource = state.apiTurns.length ? utils.mergeTurnsById(state.apiTurns, cachedDomTurns) : cachedDomTurns;
-    const sourceTurns = dom.attachDomElementsToTurns(mergedSource, state.domTurns);
+    const cachedById = new Map(cachedDomTurns.map(function(turn) { return [turn.id, turn]; }));
+    const attachedApi = dom.attachDomElementsToTurns(state.apiTurns, cachedDomTurns).map(function(turn) {
+      const current = turn.seenInCurrentDom && cachedById.get(turn.domTurnId);
+      return current ? Object.assign({}, turn, {
+        text: current.text,
+        summary: current.summary,
+        searchText: current.searchText
+      }) : turn;
+    });
+    const matchedDomIds = new Set(attachedApi.filter(function(turn) { return turn.seenInCurrentDom; }).map(function(turn) { return turn.domTurnId; }));
+    const mergedSource = state.apiTurns.length ? utils.mergeTurnsById(attachedApi, cachedDomTurns.filter(function(turn) {
+      return !matchedDomIds.has(turn.id);
+    })) : cachedDomTurns;
+    const sourceTurns = mergedSource;
     if (sourceTurns.length || force) return applyTurns(sourceTurns, !!force);
     return false;
   }
@@ -166,7 +184,7 @@
         scheduleApiRefresh(token, id);
         return;
       }
-      state.apiTurns = utils.mergeTurnsById(state.apiTurns, nextApiTurns);
+      state.apiTurns = nextApiTurns;
       refreshFromDom(true, token, id);
       scheduleApiRefresh(token, id);
     }).catch(function(error) {
@@ -190,8 +208,12 @@
     const id = conversationId || state.conversationId;
     const delay = Math.max(0, Number(delayMs) || REFRESH_DEBOUNCE_MS);
     if (!isRouteCurrent(state, token, id)) return;
-    if (state.refreshTimer) root.clearTimeout(state.refreshTimer);
+    if (state.refreshTimer) {
+      if (!force) return;
+      root.clearTimeout(state.refreshTimer);
+    }
     state.refreshTimer = root.setTimeout(function() {
+      state.refreshTimer = null;
       if (isRouteCurrent(state, token, id)) refreshFromDom(!!force, token, id);
     }, delay);
   }
@@ -226,25 +248,30 @@
     return list.length > 0 && list.every(mutationBelongsToTimeline);
   }
 
-  function hasLayoutRelevantMutation(mutations) {
-    return Array.prototype.slice.call(mutations || []).some(function(mutation) {
-      if (!mutation || mutation.type !== 'childList') return false;
-      if (mutationBelongsToTimeline(mutation)) return false;
-      return (mutation.addedNodes && mutation.addedNodes.length) || (mutation.removedNodes && mutation.removedNodes.length);
-    });
-  }
-
   function observeConversation() {
     if (state.observer || !root.MutationObserver || !root.document.body) return;
-    const target = utils.qs('main') || root.document.body;
+    // The app retains hidden routes and can replace the active scroll root.
+    const target = root.document.body;
     state.observer = new MutationObserver(function(mutations) {
       if (shouldIgnoreMutationBatch(mutations)) return;
+      if (mutations.some(function(mutation) { return mutation.type !== 'characterData' && !mutationBelongsToTimeline(mutation); })) {
+        state.ui.existingTimelineCandidates = null;
+      }
       if (root.location && root.location.href !== state.lastUrl) {
         handleRouteChange(false);
         return;
       }
+      // Do not force layout inside a MutationObserver callback while React is
+      // mounting a long answer. Resolve the visible root in the throttled refresh.
+      const conversationRoot = state.scrollEl || root.document;
+      const changedRoot = !state.scrollEl || !state.scrollEl.isConnected;
+      const relevant = mutations.filter(function(mutation) {
+        return !mutationBelongsToTimeline(mutation) && mutation.type !== 'attributes' &&
+          (conversationRoot === root.document || conversationRoot.contains(mutation.target));
+      });
+      if (!changedRoot && !relevant.length) return;
+      dom.invalidateTextCache(relevant);
       state.anchorGeometryCache = null;
-      if (state.initialized && layout && hasLayoutRelevantMutation(mutations)) layout.applyLayout(state);
       state.domCollectionReady = true;
       scheduleRefresh(
         false,
@@ -312,7 +339,7 @@
     stateModule.resetConversation(state, conversationId);
     const routeToken = state.routeToken;
     state.initialized = true;
-    state.domCollectionReady = conversationId.indexOf('dom:') === 0;
+    state.domCollectionReady = true;
     state.lastUrl = root.location.href;
     timeline.ensureUI(state, actions);
     if (layout) layout.applyLayout(state);
@@ -361,6 +388,17 @@
     if (!state.urlCheckTimer) {
       state.urlCheckTimer = root.setInterval(function() {
         if (root.location && root.location.href !== state.lastUrl) handleRouteChange(false);
+        if (!state.initialized) return;
+        // React hydration may replace the page subtree after document_idle.
+        if (!state.ui.panel || !state.ui.panel.isConnected) {
+          if (state.observer) state.observer.disconnect();
+          state.observer = null;
+          timeline.ensureUI(state, actions);
+          if (layout) layout.applyLayout(state);
+          observeConversation();
+          refreshFromDom(true, state.routeToken, state.conversationId);
+        }
+        timeline.syncVisibility(state);
       }, CONSTANTS.ROUTE_POLL_MS);
     }
   }
@@ -444,6 +482,8 @@
   }
 
   const testApi = {
+    hasExistingTimeline: timeline.hasExistingTimeline,
+    syncTimelineVisibility: timeline.syncVisibility,
     normalizeText: utils.normalizeText,
     truncate: utils.truncate,
     isConversationPage: utils.isConversationPage,

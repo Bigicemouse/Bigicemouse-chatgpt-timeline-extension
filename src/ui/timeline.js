@@ -16,12 +16,56 @@
   const RAIL_TRACK_PADDING = 8;
   const RAIL_MIN_MARKER_GAP = 20;
 
+  function getExistingTimelineCandidates() {
+    // Only navigation UI outside message bodies counts; never match transcript text.
+    const candidates = utils.qsa('[aria-label], [data-testid*="timeline"], [data-testid*="message-navigation"]');
+    return candidates.filter(function(node) {
+      if (node.closest('#' + CONSTANTS.PANEL_ID + ',[data-message-author-role],[data-testid^="conversation-turn"],[data-chatgpt-search-unit-key]')) return false;
+      const label = node.getAttribute('aria-label') || '';
+      const testId = node.getAttribute('data-testid') || '';
+      if (!/^(?:(?:conversation|chat)\s+)?timeline$|^(?:conversation|chat|message) navigation$|^(?:对话|聊天)?时间线$|^(?:对话|消息)导航$/i.test(label) &&
+          !/(?:^|-)(?:timeline|message-navigation)(?:-|$)/i.test(testId)) return false;
+      if (!node.querySelector('button,a,[role="button"]')) return false;
+      return true;
+    });
+  }
+
+  function hasExistingTimeline(candidates) {
+    return (candidates || getExistingTimelineCandidates()).some(function(node) {
+      if (!node.isConnected || node.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+      return node.getClientRects().length > 0 && (!node.checkVisibility || node.checkVisibility({ checkVisibilityCSS: true }));
+    });
+  }
+
+  function syncVisibility(state) {
+    const panel = state.ui && state.ui.panel;
+    if (!panel) return;
+    const candidates = state.ui.existingTimelineCandidates || (state.ui.existingTimelineCandidates = getExistingTimelineCandidates());
+    const suppressed = hasExistingTimeline(candidates);
+    if (state.ui.timelineSuppressed === suppressed) return;
+    state.ui.timelineSuppressed = suppressed;
+    // Inline important also overrides the extension's own fixed panel styles.
+    if (suppressed) {
+      panel.style.setProperty('display', 'none', 'important');
+      state.ui.hoverPreview = false;
+      cancelHoverClose(state);
+      cancelPreviewFrame(state);
+      const card = utils.qs('.tl-hover-card', panel);
+      if (card) card.remove();
+    } else {
+      panel.style.removeProperty('display');
+    }
+  }
+
   function destroyUI(state) {
     cancelHoverClose(state);
     cancelPreviewFrame(state);
     if (state.ui.panel && state.ui.panel.remove) state.ui.panel.remove();
     state.ui = {};
-    if (layout) layout.clearLayout();
+    if (layout) {
+      layout.clearLayout();
+      if (layout.clearConversationFont) layout.clearConversationFont();
+    }
     styles.removeStyle();
   }
 
@@ -41,6 +85,7 @@
   function render(state, actions) {
     const panel = state.ui.panel;
     if (!panel) return;
+    syncVisibility(state);
 
     if (!state.prefs) state.prefs = prefs.getDefaultPrefs();
     if (state.prefs.mode !== 'collapsed') {
@@ -51,6 +96,7 @@
     state.ui.timelineOpen = false;
     panel.className = 'tl-collapsed' + (state.ui.hoverPreview ? ' tl-previewing' : '');
     panel.setAttribute('aria-expanded', 'false');
+    if (layout && layout.applyConversationFont) layout.applyConversationFont(state);
     panel.onmouseenter = function() {
       cancelHoverClose(state);
     };
@@ -68,6 +114,7 @@
   }
 
   function cancelPreviewFrame(state) {
+    cancelPreviewPan(state);
     if (!state || !state.ui || !state.ui.previewFrame) return;
     if (root.cancelAnimationFrame) {
       root.cancelAnimationFrame(state.ui.previewFrame);
@@ -75,6 +122,52 @@
       root.clearTimeout(state.ui.previewFrame);
     }
     state.ui.previewFrame = null;
+  }
+
+  function cancelPreviewPan(state) {
+    if (!state || !state.ui) return;
+    if (state.ui.previewPanFrame) {
+      if (root.cancelAnimationFrame) root.cancelAnimationFrame(state.ui.previewPanFrame);
+      else root.clearTimeout(state.ui.previewPanFrame);
+    }
+    state.ui.previewPanFrame = null;
+  }
+
+  function bindPreviewPan(list, state, actions, items) {
+    let speed = 0;
+    let previousTime = 0;
+    function step(time) {
+      state.ui.previewPanFrame = null;
+      if (!state.ui.hoverPreview || !list.isConnected || !speed) return;
+      const elapsed = previousTime ? Math.min(48, Math.max(0, time - previousTime)) : 16;
+      previousTime = time;
+      const previousTop = list.scrollTop;
+      list.scrollTop = utils.clamp(previousTop + speed * elapsed / 1000, 0, Math.max(0, list.scrollHeight - list.clientHeight));
+      if (list.scrollTop === previousTop) return;
+      patchPreviewList(list, state, actions, items, state.activeGroupId);
+      state.ui.previewPanFrame = requestFrame(step);
+    }
+    list.addEventListener('mousemove', function(event) {
+      const rect = list.getBoundingClientRect();
+      const edge = Math.min(36, rect.height / 3);
+      const y = event.clientY - rect.top;
+      speed = edge > 0 && !event.buttons
+        ? (y < edge ? -utils.clamp((edge - y) / edge, 0, 1)
+          : y > rect.height - edge ? utils.clamp((y - rect.height + edge) / edge, 0, 1) : 0) * 600
+        : 0;
+      if (!speed) {
+        cancelPreviewPan(state);
+        previousTime = 0;
+      } else if (!state.ui.previewPanFrame) {
+        previousTime = 0;
+        state.ui.previewPanFrame = requestFrame(step);
+      }
+    }, { passive: true });
+    list.addEventListener('mouseleave', function() {
+      speed = 0;
+      previousTime = 0;
+      cancelPreviewPan(state);
+    });
   }
 
   function requestFrame(callback) {
@@ -144,8 +237,7 @@
     const track = utils.createElement('div', 'tl-marker-track');
     const content = utils.createElement('div', 'tl-marker-track-content');
     const activeId = state.activeGroupId || (state.groups[0] && state.groups[0].id) || '';
-    const scrollTarget = state.scrollEl || (locator && locator.findScrollTarget && locator.findScrollTarget());
-    const markerGeometry = buildMarkerGeometry(state.groups, activeId, scrollTarget);
+    const markerGeometry = buildMarkerGeometry(state.groups, activeId, state);
 
     setupRail(rail, state, actions);
     content.style.height = markerGeometry.contentHeight + 'px';
@@ -179,8 +271,7 @@
   function patchCollapsedRail(rail, state, actions) {
     setupRail(rail, state, actions);
     const activeId = state.activeGroupId || (state.groups[0] && state.groups[0].id) || '';
-    const scrollTarget = state.scrollEl || (locator && locator.findScrollTarget && locator.findScrollTarget());
-    const markerGeometry = buildMarkerGeometry(state.groups, activeId, scrollTarget);
+    const markerGeometry = buildMarkerGeometry(state.groups, activeId, state);
     const content = utils.qs('.tl-marker-track-content', rail);
     const byId = {};
 
@@ -263,8 +354,8 @@
     return orderedGroups[index] || null;
   }
 
-  function buildMarkerGeometry(groups, activeGroupId, scrollTarget) {
-    const allItems = utils.buildRailTimelineItems(groups, activeGroupId).items;
+  function buildMarkerGeometry(groups, activeGroupId, state) {
+    const allItems = getFilteredPreviewItems(state, activeGroupId);
     if (!allItems.length) {
       return { contentHeight: 0, items: [] };
     }
@@ -281,6 +372,7 @@
       items: sampledItems.map(function(item) {
         const ratio = utils.clamp((item.index || 0) / maxIndex, 0, 1);
         return Object.assign({}, item, {
+          active: item.id === activeGroupId,
           y: Math.round(RAIL_TRACK_PADDING + ratio * usableHeight),
           yRatio: ratio,
           hasDomGeometry: false
@@ -331,9 +423,26 @@
   }
 
   function renderHoverPreview(panel, state, actions) {
+    const currentCard = utils.qs('.tl-hover-card', panel) || state.ui.previewCard;
+    const viewportHeight = Math.max(PREVIEW_ROW_HEIGHT, Math.min(PREVIEW_VIEWPORT_HEIGHT, (root.innerHeight || 768) - 96) - 56);
+    if (currentCard && state.ui.previewGroups === state.groups && state.ui.previewViewportHeight === viewportHeight) {
+      if (!currentCard.parentNode) panel.appendChild(currentCard);
+      updateActiveClasses(state);
+      const list = utils.qs('.tl-hover-list', currentCard);
+      const items = getFilteredPreviewItems(state, state.activeGroupId);
+      if (list && !state.ui.previewAutoScrollKey) {
+        list.scrollTop = getPreviewScrollTop(state, items, state.activeGroupId);
+        patchPreviewList(list, state, actions, items, state.activeGroupId);
+      }
+      return;
+    }
+    state.ui.previewViewportHeight = viewportHeight;
+    state.ui.previewGroups = state.groups;
+    cancelPreviewFrame(state);
     const activeId = state.activeGroupId || (state.groups[0] && state.groups[0].id) || '';
     const previewItems = getFilteredPreviewItems(state, activeId);
     const card = utils.createElement('div', 'tl-hover-card');
+    state.ui.previewCard = card;
     const existingCard = utils.qs('.tl-hover-card', panel);
 
     if (existingCard) existingCard.remove();
@@ -345,6 +454,7 @@
       scheduleHoverClose(state, actions);
     });
 
+    renderFontControls(card, state);
     renderPreviewList(card, state, actions, previewItems, activeId);
     panel.appendChild(card);
 
@@ -353,17 +463,55 @@
   }
 
   function getFilteredPreviewItems(state, activeId) {
-    return utils.buildRailTimelineItems(state.groups, activeId).items;
+    if (state.ui.previewItemsGroups !== state.groups) {
+      state.ui.previewItemsGroups = state.groups;
+      state.ui.previewItems = utils.buildRailTimelineItems(state.groups, activeId).items;
+    }
+    return state.ui.previewItems;
+  }
+
+  function renderFontControls(card, state) {
+    const toolbar = utils.createElement('div', 'tl-font-controls');
+    toolbar.setAttribute('role', 'group');
+    toolbar.setAttribute('aria-label', '对话字号');
+    toolbar.appendChild(utils.createElement('span', 'tl-font-label', '对话字号'));
+    const value = utils.createElement('output');
+    const smaller = utils.createElement('button', '', 'A−');
+    const larger = utils.createElement('button', '', 'A+');
+    function update() {
+      const size = prefs.normalizeConversationFontSize(state.prefs.conversationFontSize);
+      value.textContent = size + 'px';
+      smaller.disabled = size <= 12;
+      larger.disabled = size >= 24;
+    }
+    [[smaller, -1, '减小字号'], [larger, 1, '增大字号']].forEach(function(entry) {
+      entry[0].type = 'button';
+      entry[0].setAttribute('aria-label', entry[2]);
+      entry[0].onclick = function(event) {
+        event.stopPropagation();
+        state.prefs.conversationFontSize = prefs.normalizeConversationFontSize(prefs.normalizeConversationFontSize(state.prefs.conversationFontSize) + entry[1]);
+        prefs.savePrefs(state);
+        if (layout && layout.applyConversationFont) layout.applyConversationFont(state);
+        state.anchorGeometryCache = null;
+        update();
+      };
+    });
+    toolbar.appendChild(smaller);
+    toolbar.appendChild(value);
+    toolbar.appendChild(larger);
+    card.appendChild(toolbar);
+    update();
   }
 
   function getPreviewScrollTop(state, items, activeId) {
     const key = [activeId, items.length].join('|');
-    const maxScrollTop = Math.max(0, items.length * PREVIEW_ROW_HEIGHT - PREVIEW_VIEWPORT_HEIGHT);
+    const viewportHeight = state.ui.previewViewportHeight || PREVIEW_VIEWPORT_HEIGHT;
+    const maxScrollTop = Math.max(0, items.length * PREVIEW_ROW_HEIGHT - viewportHeight);
 
     if (state.ui.previewAutoScrollKey !== key) {
       const activeIndex = items.findIndex(function(item) { return item.id === activeId; });
       state.ui.previewScrollTop = activeIndex >= 0
-        ? utils.clamp(Math.round(activeIndex * PREVIEW_ROW_HEIGHT - (PREVIEW_VIEWPORT_HEIGHT - PREVIEW_ROW_HEIGHT) / 2), 0, maxScrollTop)
+        ? utils.clamp(Math.round(activeIndex * PREVIEW_ROW_HEIGHT - (viewportHeight - PREVIEW_ROW_HEIGHT) / 2), 0, maxScrollTop)
         : 0;
       state.ui.previewAutoScrollKey = key;
     }
@@ -376,15 +524,16 @@
     const spacer = utils.createElement('div', 'tl-hover-list-spacer');
     const windowNode = utils.createElement('div', 'tl-hover-list-window');
     const scrollTop = getPreviewScrollTop(state, previewItems, activeId);
-    const windowInfo = buildPreviewWindow(previewItems.length, scrollTop);
+    const windowInfo = buildPreviewWindow(previewItems.length, scrollTop, state.ui.previewViewportHeight);
     const visibleItems = previewItems.slice(windowInfo.startIndex, windowInfo.endIndex);
 
     state.ui.previewScrollTop = scrollTop;
     state.ui.virtualWindow = windowInfo;
-    list.style.height = Math.min(PREVIEW_VIEWPORT_HEIGHT, Math.max(PREVIEW_ROW_HEIGHT, windowInfo.totalHeight || PREVIEW_ROW_HEIGHT)) + 'px';
+    list.style.height = Math.min(state.ui.previewViewportHeight, Math.max(PREVIEW_ROW_HEIGHT, windowInfo.totalHeight || PREVIEW_ROW_HEIGHT)) + 'px';
     list.style.maxHeight = PREVIEW_VIEWPORT_HEIGHT + 'px';
     list.style.overflowY = 'auto';
     list.setAttribute('role', 'listbox');
+    bindPreviewPan(list, state, actions, previewItems);
     list.addEventListener('scroll', function() {
       state.ui.previewScrollTop = list.scrollTop;
       if (state.ui.previewFrame) return;
@@ -416,21 +565,32 @@
     const spacer = utils.qs('.tl-hover-list-spacer', list);
     const windowNode = utils.qs('.tl-hover-list-window', list);
     const scrollTop = Math.max(0, Number(list.scrollTop) || 0);
-    const windowInfo = buildPreviewWindow(previewItems.length, scrollTop);
+    const windowInfo = buildPreviewWindow(previewItems.length, scrollTop, state.ui.previewViewportHeight);
     const visibleItems = previewItems.slice(windowInfo.startIndex, windowInfo.endIndex);
 
     state.ui.previewScrollTop = scrollTop;
+    const previousWindow = state.ui.virtualWindow;
+    if (previousWindow && previousWindow.startIndex === windowInfo.startIndex && previousWindow.endIndex === windowInfo.endIndex) return;
     state.ui.virtualWindow = windowInfo;
     if (spacer) spacer.style.height = windowInfo.totalHeight + 'px';
     if (!windowNode) return;
     windowNode.style.transform = 'translateY(' + windowInfo.offsetTop + 'px)';
-    while (windowNode.firstChild) windowNode.removeChild(windowNode.firstChild);
-    visibleItems.forEach(function(item) {
-      windowNode.appendChild(renderPreviewRow(state, actions, item));
+    const existingRows = new Map();
+    Array.from(windowNode.children).forEach(function(row) {
+      existingRows.set(row.getAttribute('data-tl-group-id'), row);
     });
+    const fragment = root.document.createDocumentFragment();
+    visibleItems.forEach(function(item) {
+      const row = existingRows.get(item.id) || renderPreviewRow(state, actions, item);
+      row.classList.toggle('active', item.id === state.activeGroupId);
+      existingRows.delete(item.id);
+      fragment.appendChild(row);
+    });
+    existingRows.forEach(function(row) { row.remove(); });
+    windowNode.appendChild(fragment);
   }
 
-  function buildPreviewWindow(itemCount, scrollTop) {
+  function buildPreviewWindow(itemCount, scrollTop, viewportHeight) {
     if (itemCount <= PREVIEW_FULL_RENDER_LIMIT || !virtualList || !virtualList.computeVirtualWindow) {
       return {
         startIndex: 0,
@@ -443,14 +603,14 @@
     return virtualList.computeVirtualWindow({
       itemCount: itemCount,
       rowHeight: PREVIEW_ROW_HEIGHT,
-      viewportHeight: PREVIEW_VIEWPORT_HEIGHT,
+      viewportHeight: viewportHeight || PREVIEW_VIEWPORT_HEIGHT,
       scrollTop: scrollTop,
       overscan: PREVIEW_OVERSCAN
     });
   }
 
   function renderPreviewRow(state, actions, item) {
-    const row = utils.createElement('div', 'tl-hover-row' + (item.active ? ' active' : ''));
+    const row = utils.createElement('div', 'tl-hover-row' + (item.id === state.activeGroupId ? ' active' : ''));
     const titleButton = utils.createElement('button', 'tl-hover-title-button');
     const body = utils.createElement('span', 'tl-hover-body');
     const title = utils.createElement('span', 'tl-hover-title', item.title);
@@ -460,12 +620,16 @@
     row.style.height = PREVIEW_ROW_HEIGHT + 'px';
     row.addEventListener('click', function(event) {
       event.stopPropagation();
+      activatePreviewGroup(state, item.id);
+      updateActiveClasses(state);
       if (actions.jumpToGroup) actions.jumpToGroup(item.group);
     });
 
     titleButton.type = 'button';
     titleButton.addEventListener('click', function(event) {
       event.stopPropagation();
+      activatePreviewGroup(state, item.id);
+      updateActiveClasses(state);
       if (actions.jumpToGroup) actions.jumpToGroup(item.group);
     });
     body.appendChild(title);
@@ -492,6 +656,8 @@
   }
 
   ns.timeline = {
+    hasExistingTimeline: hasExistingTimeline,
+    syncVisibility: syncVisibility,
     ensureUI: ensureUI,
     destroyUI: destroyUI,
     render: render,
