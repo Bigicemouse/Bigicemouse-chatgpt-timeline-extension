@@ -36,6 +36,15 @@
           <span>更宽</span>
         </div>
       </div>
+      <section class="tl-popup-export" aria-labelledby="tl-export-title">
+        <div class="tl-popup-plugin-text">
+          <h2 id="tl-export-title" class="tl-popup-plugin-title">对话导出</h2>
+          <p class="tl-popup-plugin-desc">全部或选择对话，导出 JSON + Markdown</p>
+          <p class="tl-popup-export-note">支持个人、项目、团队空间及增量备份</p>
+        </div>
+        <button id="tl-open-exporter" class="tl-popup-export-button" type="button">打开导出面板</button>
+        <p id="tl-export-status" class="tl-popup-export-status" role="status" aria-live="polite" hidden></p>
+      </section>
     </section>
   </main>
   <script src="./popup.js"></script>

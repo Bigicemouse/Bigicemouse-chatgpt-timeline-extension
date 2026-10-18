@@ -40,7 +40,6 @@
             resolve();
           }
           requestAnimationFrame(finish);
-          setTimeout(finish, 0);
         });
       }
       function fakeTurnElement(testId, role, text) {
@@ -60,6 +59,51 @@
       setTimeout(async function() {
         try {
           var api = window.__TL_TEST_API__;
+          var imagePrompt = '[Image: image (2048x755)] 解读里面的c++知识';
+          var imageGroups = api.buildQaGroups([{ id: 'image-prompt', role: 'u', text: imagePrompt }]);
+          assertEqual(imageGroups[0].summary, '解读里面的c++知识', 'image preview should show only prompt text');
+          assertEqual(imageGroups[0].userTurn.text, imagePrompt, 'preview cleanup must preserve original message');
+          assertEqual(api.buildQaGroups([{ role: 'u', text: '[Image: first] [Image: second] 比较两张图' }])[0].summary, '比较两张图', 'multiple image placeholders should be omitted');
+          assertEqual(api.buildQaGroups([{ role: 'u', text: '[Image: image (80x80)]' }])[0].summary, '图片', 'image-only prompt should retain a navigable label');
+          var ownTimeline = document.createElement('aside');
+          ownTimeline.id = 'tl-chat-timeline';
+          ownTimeline.setAttribute('aria-label', 'Conversation timeline');
+          ownTimeline.innerHTML = '<button>Own marker</button>';
+          document.body.appendChild(ownTimeline);
+          var visibilityState = { ui: { panel: ownTimeline } };
+          var nativeTimeline = document.createElement('nav');
+          nativeTimeline.setAttribute('aria-label', 'Conversation timeline');
+          nativeTimeline.innerHTML = '<button>Native marker</button>';
+          try {
+            assertEqual(api.hasExistingTimeline(), false, 'extension must not detect itself');
+            api.syncTimelineVisibility(visibilityState);
+            var originalVisibilityQsa = window.TLTimelineModules.utils.qsa;
+            var idleVisibilityQueries = 0;
+            window.TLTimelineModules.utils.qsa = function(selector, target) {
+              idleVisibilityQueries += 1;
+              return originalVisibilityQsa(selector, target);
+            };
+            try {
+              for (var idleTick = 0; idleTick < 20; idleTick += 1) api.syncTimelineVisibility(visibilityState);
+              assertEqual(idleVisibilityQueries, 0, 'idle visibility checks must not repeat DOM queries');
+            } finally { window.TLTimelineModules.utils.qsa = originalVisibilityQsa; }
+            document.body.appendChild(nativeTimeline);
+            visibilityState.ui.existingTimelineCandidates = null;
+            api.syncTimelineVisibility(visibilityState);
+            assertEqual(getComputedStyle(ownTimeline).display, 'none', 'late native timeline must suppress extension');
+            nativeTimeline.hidden = true;
+            api.syncTimelineVisibility(visibilityState);
+            assertEqual(ownTimeline.style.display, '', 'hidden native timeline must allow extension');
+            nativeTimeline.hidden = false;
+            nativeTimeline.setAttribute('data-message-author-role', 'assistant');
+            assertEqual(api.hasExistingTimeline(), false, 'message content must not count as navigation');
+            nativeTimeline.remove();
+            api.syncTimelineVisibility(visibilityState);
+            assertEqual(ownTimeline.style.display, '', 'removed native timeline must allow extension');
+          } finally {
+            ownTimeline.remove();
+            nativeTimeline.remove();
+          }
           assertEqual(api.isConversationPage('https://chatgpt.com/'), false, 'home page should not initialize timeline');
           assertEqual(api.isConversationPage('https://chatgpt.com/g/g-abc'), false, 'GPT page should not initialize timeline');
           assertEqual(api.isConversationPage('https://chatgpt.com/c/chat-123'), true, 'conversation page should initialize timeline');
@@ -287,6 +331,66 @@
           assertEqual(voyagerDomTurns[0].text, 'Visible user text', 'DOM text extraction should strip hidden text and extension UI');
           assertEqual(voyagerDomTurns[1].apiMessageId, 'fallback-message-id', 'DOM collector should keep message ids from fallback selectors');
           domHost.remove();
+          var modernHost = document.createElement('div');
+          modernHost.setAttribute('data-app-action-timeline-scroll', '');
+          modernHost.style.cssText = 'height:160px;overflow-y:auto';
+          modernHost.innerHTML = '<div data-chatgpt-search-unit-key="fallback-turn-3:0:user" data-chatgpt-search-message-ids="modern-u"><div data-user-message-bubble="true">继续详细解读</div><button>Copy message</button></div>' +
+            '<div style="height:700px" data-chatgpt-search-unit-key="fallback-turn-3:2:assistant" data-chatgpt-search-message-ids="modern-a modern-a"><h4 class="sr-only">ChatGPT said:</h4><div class="markdown">Answer</div></div>';
+          document.body.appendChild(modernHost);
+          var modernCollector = window.TLTimelineModules.domCollector;
+          var modernLocator = window.TLTimelineModules.locator;
+          var modernState = api.createState();
+          try {
+            var modernTurns = modernCollector.collectTurns();
+            assertEqual(modernTurns.length, 2, 'modern search units must produce distinct user and assistant messages');
+            assertEqual(modernTurns[0].apiMessageId, 'modern-u', 'modern message identity must be extracted');
+            assertEqual(modernTurns[1].apiMessageId, 'modern-a', 'duplicated modern ids must be normalized');
+            assertEqual(modernTurns[0].text, '继续详细解读', 'modern prompt must omit action buttons');
+            assertEqual(modernTurns[1].text, 'Answer', 'modern assistant must omit accessibility heading');
+            assertEqual(api.findScrollTarget(), modernHost, 'active modern scroll root must win over nested code scrollers');
+            var cachedBubble = modernHost.querySelector('[data-user-message-bubble]');
+            var originalClone = cachedBubble.cloneNode;
+            var repeatClones = 0;
+            cachedBubble.cloneNode = function() { repeatClones += 1; return originalClone.apply(this, arguments); };
+            assertEqual(modernCollector.collectTurns()[0].text, '继续详细解读', 'unchanged message text must reuse cache');
+            assertEqual(repeatClones, 0, 'unchanged message must not be cloned on refresh');
+            cachedBubble.cloneNode = originalClone;
+            var bubble = modernHost.querySelector('[data-user-message-bubble]');
+            bubble.firstChild.data = '更新后的问题';
+            modernCollector.invalidateTextCache([{ target: bubble.firstChild }]);
+            assertEqual(modernCollector.collectTurns()[0].text, '更新后的问题', 'text mutations must invalidate the cached prompt');
+            var broadCollections = 0;
+            var originalModernCollect = modernCollector.collectTurns;
+            modernCollector.collectTurns = function() { broadCollections += 1; return originalModernCollect(); };
+            try {
+              var exactSource = { id: 'modern-u', apiMessageId: 'modern-u', role: 'u', text: '[Image: image] 更新后的问题' };
+              modernState.turns = [exactSource];
+              modernHost.scrollTop = 400;
+              modernLocator.jumpToTurn(modernState, exactSource);
+              assertEqual(modernState.locateTimer, null, 'mounted identity jump must not schedule repeated settle scans');
+              assertEqual(modernState.highlightedEl, modernHost.firstElementChild, 'jump must highlight the exact modern message');
+              assertEqual(modernHost.scrollTop < 2, true, 'jump must align the prompt at the scroll root start');
+              assertEqual(broadCollections, 0, 'identity jump must not collect or clone the whole conversation');
+              var originalJumpScroll = modernHost.firstElementChild.scrollIntoView;
+              var directScrolls = 0;
+              modernHost.firstElementChild.scrollIntoView = function(options) {
+                directScrolls += 1;
+                return originalJumpScroll.call(this, options);
+              };
+              modernLocator.jumpToTurn(modernState, exactSource);
+              await new Promise(function(resolve) { setTimeout(resolve, 800); });
+              assertEqual(directScrolls, 1, 'mounted jump should scroll once without a delayed correction loop');
+              modernHost.firstElementChild.scrollIntoView = originalJumpScroll;
+              modernState.routeToken += 1;
+              modernHost.scrollTop = 300;
+              await new Promise(function(resolve) { setTimeout(resolve, 300); });
+              assertEqual(modernHost.scrollTop, 300, 'old settle callback must not scroll a new route');
+            } finally { modernCollector.collectTurns = originalModernCollect; }
+          } finally {
+            clearTimeout(modernState.locateTimer);
+            clearTimeout(modernState.highlightTimer);
+            modernHost.remove();
+          }
           var attached = api.attachDomElementsToTurns(apiTurns, domTurns);
           assertEqual(attached[0].seenInCurrentDom, false, 'API turn outside DOM should remain detached');
           assertEqual(attached[2].seenInCurrentDom, true, 'API turn should attach to matching visible DOM turn');
@@ -294,6 +398,42 @@
           var merged = api.mergeTurnsById([], attached);
           assertEqual(merged.length, 4, 'merge should preserve every API turn');
           assertEqual(merged[2].seenInCurrentDom, true, 'merge should preserve DOM visibility');
+
+          var repeatSources = [
+            { id: 'repeat-1', apiMessageId: 'repeat-1', role: 'u', text: '继续', sortIndex: 1, source: 'api' },
+            { id: 'repeat-2', apiMessageId: 'repeat-2', role: 'u', text: '继续', sortIndex: 3, source: 'api' }
+          ];
+          var repeatDom = [{ id: 'dom-repeat', apiMessageId: 'repeat-2', role: 'u', text: '继续', sortIndex: 0, el: document.createElement('div'), seenInCurrentDom: true, source: 'dom' }];
+          var repeatAttached = api.attachDomElementsToTurns(repeatSources, repeatDom);
+          assertEqual(repeatAttached[0].el, null, 'a different message id must not match repeated text');
+          assertEqual(repeatAttached[1].el, repeatDom[0].el, 'exact message identity must win');
+          var orderMerged = api.mergeTurnsById(repeatSources, repeatDom);
+          assertEqual(orderMerged[1].apiMessageId, 'repeat-2', 'DOM numbering must not reorder API messages');
+          assertEqual(orderMerged[1].sortIndex, 3, 'API ordering must survive DOM attachment');
+          var ambiguousDom = [{ id: 'unknown-dom', role: 'u', text: '继续', el: document.createElement('div') }];
+          assertEqual(api.attachDomElementsToTurns(repeatSources, ambiguousDom).filter(function(turn) { return turn.el; }).length, 0, 'ambiguous repeated text must not bind two messages to one node');
+          var prefix = 'x'.repeat(230);
+          assertEqual(api.attachDomElementsToTurns([{ id: 'prefix-a', role: 'u', text: prefix + 'a' }], [{ id: 'prefix-b', role: 'u', text: prefix + 'b', el: document.createElement('div') }])[0].el, null, 'shared text prefixes must not identify different messages');
+
+          var originalCollectForJump = window.TLTimelineModules.domCollector.collectTurns;
+          var jumpState = api.createState();
+          var jumpedOld = false;
+          var repeatedTarget = document.createElement('div');
+          repeatedTarget.scrollIntoView = function() {};
+          repeatDom[0].el = repeatedTarget;
+          jumpState.turns = repeatSources;
+          jumpState.locateTimer = setTimeout(function() { jumpedOld = true; }, 0);
+          window.TLTimelineModules.domCollector.collectTurns = function() { return repeatDom; };
+          try {
+            assertEqual(window.TLTimelineModules.locator.findVisibleDomTurn(repeatSources[0], repeatSources), null, 'jump lookup must reject conflicting ids');
+            window.TLTimelineModules.locator.jumpToTurn(jumpState, repeatSources[1]);
+            await new Promise(function(resolve) { setTimeout(resolve, 10); });
+            assertEqual(jumpedOld, false, 'a new visible jump must cancel the previous delayed jump');
+          } finally {
+            window.TLTimelineModules.domCollector.collectTurns = originalCollectForJump;
+            clearTimeout(jumpState.highlightTimer);
+            clearTimeout(jumpState.locateTimer);
+          }
 
           var fetchState = api.createState();
           fetchState.conversationId = 'chat-123';
@@ -489,6 +629,18 @@
           api.renderTimeline(uiState, markerActions);
           window.TLTimelineModules.styles.ensureStyle();
           var styleText = document.getElementById('tl-chat-style').textContent;
+          var originalThemeClass = document.documentElement.className;
+          try {
+            ['light', 'dark', 'light'].forEach(function(theme) {
+              document.documentElement.classList.remove('light', 'dark');
+              document.documentElement.classList.add(theme);
+              var themeStyle = window.getComputedStyle(document.documentElement);
+              assertEqual(themeStyle.getPropertyValue('--tl-preview-bg').trim(), theme === 'dark' ? '#202020' : '#ffffff', 'preview background should follow live page theme changes');
+              assertEqual(themeStyle.getPropertyValue('--tl-preview-text').trim(), theme === 'dark' ? '#f5f5f5' : '#202123', 'preview text should remain readable after theme changes');
+            });
+          } finally {
+            document.documentElement.className = originalThemeClass;
+          }
           assertMatch(styleText, /--tl-blue:#6ea0ff/, 'timeline should use the screenshot blue marker token');
           assertMatch(styleText, /--tl-preview-width:min\(302px/, 'hover preview should use the DeepSeek screenshot-sized card width');
           assertMatch(styleText, /--tl-marker:#5b5b5b/, 'inactive markers should use muted gray');
@@ -619,6 +771,59 @@
           assertEqual(nineteenList.scrollTop > 0, true, 'scrolling a 19 row preview should preserve scroll position');
           nineteenUiState.ui.panel.querySelector('[data-tl-group-id="' + nineteenGroups[18].id + '"] .tl-hover-title-button').click();
           assertEqual(nineteenJumpedGroupId, nineteenGroups[18].id, 'clicking the 19th preview row should stay clickable after scrolling');
+          var lastPreviewRow = nineteenRows[nineteenRows.length - 1];
+          var lastPreviewRect = lastPreviewRow.getBoundingClientRect();
+          var cardBottom = nineteenCard.getBoundingClientRect().bottom;
+          assertEqual(lastPreviewRect.bottom <= cardBottom - 12, true, 'last row must remain above the rounded card bottom padding');
+          assertEqual(lastPreviewRect.top >= nineteenList.getBoundingClientRect().top, true, 'last row must be fully visible after scrolling to the end');
+          var originalPreviewRow = nineteenRows[0];
+          var fontFixture = document.createElement('main');
+          fontFixture.innerHTML = '<div data-message-author-role="user"><div class="whitespace-pre-wrap">用户消息</div></div><div data-message-author-role="assistant"><div class="markdown" style="font-size:16px"><h2 style="font-size:1.5em">标题</h2><p>GPT 回复</p></div></div><button style="font-size:14px">操作</button>';
+          document.body.appendChild(fontFixture);
+          var increaseFont = nineteenCard.querySelector('[aria-label="增大字号"]');
+          increaseFont.click();
+          assertEqual(window.getComputedStyle(fontFixture.querySelector('p')).fontSize, '17px', 'font button must immediately resize GPT reply text');
+          assertEqual(window.getComputedStyle(fontFixture.querySelector('.whitespace-pre-wrap')).fontSize, '17px', 'user message text must resize too');
+          assertEqual(window.getComputedStyle(fontFixture.querySelector('h2')).fontSize, '25.5px', 'headings must retain relative sizing');
+          assertEqual(window.getComputedStyle(fontFixture.querySelector('button')).fontSize, '14px', 'conversation actions must keep their own size');
+          assertEqual(window.getComputedStyle(originalPreviewRow).fontSize, '13px', 'timeline labels must keep their original size');
+          var streamedReply = document.createElement('div');
+          streamedReply.setAttribute('data-chatgpt-search-unit-key', 'fallback-turn-99:0:assistant');
+          streamedReply.innerHTML = '<div class="markdown" style="font-size:16px"><p>新生成的回复</p></div>';
+          fontFixture.appendChild(streamedReply);
+          assertEqual(window.getComputedStyle(streamedReply.querySelector('p')).fontSize, '17px', 'newly mounted modern replies must inherit the selected conversation font');
+          nineteenUiState.prefs.readingWidthEnabled = false;
+          api.applyLayout(nineteenUiState);
+          assertEqual(window.getComputedStyle(fontFixture.querySelector('p')).fontSize, '17px', 'font size must work independently of the reading width toggle');
+
+          assertEqual(window.TLTimelineModules.state.loadPrefs().conversationFontSize, 17, 'conversation font size must persist');
+          for (var fontStep = 0; fontStep < 20; fontStep += 1) increaseFont.click();
+          assertEqual(nineteenUiState.prefs.conversationFontSize, 24, 'font increase must stop at the upper bound');
+          assertEqual(increaseFont.disabled, true, 'font increase must disable at the upper bound');
+          assertEqual(lastPreviewRow.getBoundingClientRect().bottom <= cardBottom - 12, true, 'largest font must preserve bottom row spacing');
+          var decreaseFont = nineteenCard.querySelector('[aria-label="减小字号"]');
+          for (var fontDown = 0; fontDown < 20; fontDown += 1) decreaseFont.click();
+          assertEqual(nineteenUiState.prefs.conversationFontSize, 12, 'font decrease must stop at the lower bound');
+          assertEqual(decreaseFont.disabled, true, 'font decrease must disable at the lower bound');
+          for (var fontReset = 0; fontReset < 2; fontReset += 1) increaseFont.click();
+          assertEqual(nineteenCard.querySelector('.tl-hover-row') === originalPreviewRow, true, 'font changes must reuse existing rows');
+          nineteenCard.dispatchEvent(new MouseEvent('mouseleave'));
+          await new Promise(function(resolve) { setTimeout(resolve, 220); });
+          var originalBuildItems = window.TLTimelineModules.utils.buildRailTimelineItems;
+          var repeatedItemBuilds = 0;
+          window.TLTimelineModules.utils.buildRailTimelineItems = function() {
+            repeatedItemBuilds += 1;
+            return originalBuildItems.apply(this, arguments);
+          };
+          try {
+            nineteenUiState.ui.panel.querySelector('.tl-marker-rail').dispatchEvent(new MouseEvent('mouseenter'));
+            assertEqual(nineteenUiState.ui.panel.querySelector('.tl-hover-card') === nineteenCard, true, 'reopening must reuse the cached preview card');
+            assertEqual(nineteenCard.querySelector('.tl-hover-row') === originalPreviewRow, true, 'reopening must reuse preview rows');
+            assertEqual(repeatedItemBuilds, 0, 'reopening must not rebuild or sort all timeline items');
+          } finally {
+            window.TLTimelineModules.utils.buildRailTimelineItems = originalBuildItems;
+          }
+          fontFixture.remove();
           nineteenUiState.ui.panel.remove();
 
           var hugeTurns = [];
@@ -660,18 +865,45 @@
           assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-list').scrollTop > 0, true, 'virtual preview should scroll the active row into view');
           var hugeCardBeforeScroll = hugeUiState.ui.panel.querySelector('.tl-hover-card');
           var hugeListBeforeScroll = hugeUiState.ui.panel.querySelector('.tl-hover-list');
+          var overlappingRow = hugeListBeforeScroll.querySelector('.tl-hover-row.active');
           hugeListBeforeScroll.scrollTop = hugeListBeforeScroll.scrollTop + 40;
           hugeListBeforeScroll.dispatchEvent(new Event('scroll'));
           await waitForFrame();
           assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-card') === hugeCardBeforeScroll, true, 'virtual preview scroll should patch the list without rebuilding the card');
           assertEqual(hugeUiState.ui.panel.querySelectorAll('.tl-hover-row').length <= 40, true, 'virtual preview scroll should keep rendering bounded to the window');
+          assertEqual(hugeListBeforeScroll.querySelector('.tl-hover-row.active') === overlappingRow, true, 'overlapping virtual windows must reuse existing visible rows');
+          assertEqual(getComputedStyle(hugeCardBeforeScroll).borderTopWidth, '0px', 'navigation preview must have no visible frame');
+          var panRect = hugeListBeforeScroll.getBoundingClientRect();
+          var beforePan = hugeListBeforeScroll.scrollTop;
+          hugeListBeforeScroll.dispatchEvent(new MouseEvent('mousemove', { clientY: panRect.bottom - 2 }));
+          await new Promise(function(resolve) { setTimeout(resolve, 100); });
+          assertEqual(hugeListBeforeScroll.scrollTop > beforePan, true, 'moving toward the lower edge must reveal later questions without the wheel');
+          hugeListBeforeScroll.dispatchEvent(new MouseEvent('mousemove', { clientY: panRect.top + panRect.height / 2 }));
+          var stoppedPan = hugeListBeforeScroll.scrollTop;
+          await new Promise(function(resolve) { setTimeout(resolve, 60); });
+          assertEqual(hugeListBeforeScroll.scrollTop, stoppedPan, 'moving back to the center must stop scrolling so rows remain clickable');
+          hugeListBeforeScroll.dispatchEvent(new MouseEvent('mousemove', { clientY: panRect.top + 2 }));
+          await new Promise(function(resolve) { setTimeout(resolve, 100); });
+          assertEqual(hugeListBeforeScroll.scrollTop < stoppedPan, true, 'moving toward the upper edge must reveal earlier questions');
+          hugeListBeforeScroll.dispatchEvent(new MouseEvent('mouseleave'));
+          assertEqual(hugeUiState.ui.previewPanFrame, null, 'leaving the list must cancel hover scrolling');
+          var firstStableRow = hugeUiState.ui.panel.querySelector('.tl-hover-row');
+          hugeListBeforeScroll.dispatchEvent(new Event('scroll'));
+          await waitForFrame();
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-row'), firstStableRow, 'unchanged virtual windows must reuse row nodes');
+          hugeUiState.activeGroupId = hugeGroups[2].id;
+          window.TLTimelineModules.timeline.updateActiveClasses(hugeUiState);
+          hugeListBeforeScroll.scrollTop = 0;
+          hugeListBeforeScroll.dispatchEvent(new Event('scroll'));
+          await waitForFrame();
+          assertEqual(hugeUiState.ui.panel.querySelector('.tl-hover-row.active').getAttribute('data-tl-group-id'), hugeGroups[2].id, 'new virtual rows must use current active state, not the captured render state');
           assertEqual(hugeUiState.ui.panel.querySelector('.tl-search-input') === null, true, 'huge hover preview should not render the old search input');
           hugeUiState.ui.panel.remove();
 
           assertEqual(typeof api.bindScrollSpy, 'function', 'scroll spy binder should be exposed for scheduling tests');
           assertEqual(typeof api.findScrollTarget, 'function', 'scroll target detection should be exposed for performance tests');
           assertEqual(typeof api.getConversationObserverConfig, 'function', 'conversation observer config should be exposed for mutation tests');
-          assertEqual(api.getConversationObserverConfig().characterData, false, 'conversation observer should not listen to streaming characterData changes');
+          assertEqual(api.getConversationObserverConfig().characterData, true, 'conversation observer must invalidate cached text for streaming updates');
           assertEqual(typeof api.shouldIgnoreMutationBatch, 'function', 'timeline mutation filter should be exposed for mutation tests');
           var mutationPanel = document.createElement('aside');
           var mutationChild = document.createElement('div');

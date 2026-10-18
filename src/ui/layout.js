@@ -4,6 +4,20 @@
   const READABLE_CLASS = 'gv-plugin-chatgpt-readable';
   const READING_WIDTH_VAR = '--gv-plugin-reading-width';
 
+  function applyConversationFont(state) {
+    const body = root.document && root.document.body;
+    if (!body || !state || !state.prefs) return;
+    body.classList.add('tl-chat-font');
+    body.style.setProperty('--tl-conversation-font-size', ns.state.normalizeConversationFontSize(state.prefs.conversationFontSize) + 'px');
+  }
+
+  function clearConversationFont() {
+    const body = root.document && root.document.body;
+    if (!body) return;
+    body.classList.remove('tl-chat-font');
+    body.style.removeProperty('--tl-conversation-font-size');
+  }
+
   function getReadingWidth(state) {
     const stateModule = ns.state;
     if (stateModule && stateModule.normalizeReadingWidth) {
@@ -34,6 +48,8 @@
   ns.layout = {
     READABLE_CLASS: READABLE_CLASS,
     READING_WIDTH_VAR: READING_WIDTH_VAR,
+    applyConversationFont: applyConversationFont,
+    clearConversationFont: clearConversationFont,
     applyLayout: applyLayout,
     clearLayout: clearLayout
   };

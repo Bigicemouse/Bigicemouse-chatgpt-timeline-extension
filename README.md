@@ -4,7 +4,7 @@ English | [中文](#chatgpt-时间线导航器)
 
 A Chrome/Edge extension that adds a fixed right-side timeline to ChatGPT conversations.
 
-Current version: **v2.00**
+Current version: **v2.01**
 
 ## Features
 
@@ -34,7 +34,7 @@ Open `content-script.test.html` in a browser. The page displays `PASS` when test
 
 这是一个 Chrome/Edge 扩展，用于给 ChatGPT 对话添加固定在右侧的时间线导航。
 
-当前版本：**v2.00**
+当前版本：**v2.01**
 
 ## 功能
 

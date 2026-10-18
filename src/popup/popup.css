@@ -1,11 +1,26 @@
 :root{
-  color-scheme:dark;
-  --tl-popup-bg:#15181c;
-  --tl-popup-panel:#202020;
-  --tl-popup-border:#343434;
-  --tl-popup-text:#f4f4f5;
-  --tl-popup-muted:#9ca3af;
-  --tl-popup-blue:#6ea0ff;
+  color-scheme:light;
+  --tl-popup-bg:#ffffff;
+  --tl-popup-panel:#f9fafb;
+  --tl-popup-border:#e5e7eb;
+  --tl-popup-text:#202123;
+  --tl-popup-muted:#6b7280;
+  --tl-popup-blue:#2563eb;
+  --tl-popup-border-hover:#9ca3af;
+  --tl-popup-toggle-off:#d1d5db;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme:dark;
+    --tl-popup-bg:#15181c;
+    --tl-popup-panel:#202020;
+    --tl-popup-border:#343434;
+    --tl-popup-text:#f4f4f5;
+    --tl-popup-muted:#9ca3af;
+    --tl-popup-blue:#6ea0ff;
+    --tl-popup-border-hover:#3f4650;
+    --tl-popup-toggle-off:#374151;
+  }
 }
 *{
   box-sizing:border-box;
@@ -59,7 +74,7 @@ body{
   margin-top:12px;
 }
 .tl-popup-plugin:hover{
-  border-color:#3f4650;
+  border-color:var(--tl-popup-border-hover);
 }
 .tl-popup-plugin-text{
   display:grid;
@@ -84,7 +99,7 @@ body{
   width:54px;
   height:30px;
   border-radius:999px;
-  background:#374151;
+  background:var(--tl-popup-toggle-off);
   transition:background .16s ease;
 }
 .tl-popup-toggle::after{
@@ -134,3 +149,36 @@ body{
   color:var(--tl-popup-muted);
   font-size:12px;
 }
+.tl-popup-export{
+  margin-top:12px;
+  padding:14px 16px;
+  border:1px solid var(--tl-popup-border);
+  border-radius:12px;
+  background:var(--tl-popup-panel);
+}
+.tl-popup-export h2,
+.tl-popup-export p{
+  margin:0;
+}
+.tl-popup-export-note,
+.tl-popup-export-status{
+  font-size:12px;
+  color:var(--tl-popup-muted);
+}
+.tl-popup-export-button{
+  width:100%;
+  margin-top:12px;
+  padding:10px 12px;
+  border:1px solid var(--tl-popup-blue);
+  border-radius:8px;
+  background:var(--tl-popup-blue);
+  color:var(--tl-popup-bg);
+  font:inherit;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+}
+.tl-popup-export-button:hover{filter:brightness(1.08);}
+.tl-popup-export-button:disabled{opacity:.6;cursor:wait;}
+.tl-popup-export-button:focus-visible{outline:2px solid var(--tl-popup-text);outline-offset:3px;}
+.tl-popup-export .tl-popup-export-status{margin-top:10px;}

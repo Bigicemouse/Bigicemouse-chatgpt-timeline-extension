@@ -1,18 +1,19 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Timeline Navigator",
-  "version": "2.0.0",
-  "version_name": "v2.00",
+  "version": "2.0.1",
+  "version_name": "v2.01",
   "description": "Timeline sidebar for ChatGPT conversations",
   "permissions": [
     "storage",
-    "webRequest"
+    "webRequest",
+    "scripting"
   ],
   "host_permissions": [
     "https://chatgpt.com/*"
   ],
   "background": {
-    "service_worker": "src/background/token-capture.js"
+    "service_worker": "src/background/service-worker.js"
   },
   "action": {
     "default_title": "ChatGPT Timeline Navigator",

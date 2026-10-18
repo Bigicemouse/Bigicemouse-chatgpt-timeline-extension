@@ -9,6 +9,7 @@
   function getDefaultPrefs() {
     return {
       mode: 'collapsed',
+      conversationFontSize: 16,
       readingWidthEnabled: true,
       readingWidthPx: DEFAULT_READING_WIDTH_PX,
       formulaCopyEnabled: true
@@ -24,6 +25,10 @@
     return utils.clamp(width, MIN_READING_WIDTH_PX, MAX_READING_WIDTH_PX);
   }
 
+  function normalizeConversationFontSize(value) {
+    return utils.clamp(Math.round(Number(value) || 16), 12, 24);
+  }
+
   function normalizeBoolean(value, fallback) {
     if (value === true || value === false) return value;
     return fallback;
@@ -37,6 +42,7 @@
       const parsed = JSON.parse(root.localStorage.getItem(CONSTANTS.PREFS_KEY) || '{}');
       return {
         mode: normalizeMode(parsed.mode || parsed.timelineMode),
+        conversationFontSize: normalizeConversationFontSize(parsed.conversationFontSize),
         readingWidthEnabled: normalizeBoolean(parsed.readingWidthEnabled, defaults.readingWidthEnabled),
         readingWidthPx: normalizeReadingWidth(parsed.readingWidthPx),
         formulaCopyEnabled: normalizeBoolean(parsed.formulaCopyEnabled, defaults.formulaCopyEnabled)
@@ -51,6 +57,7 @@
     try {
       root.localStorage.setItem(CONSTANTS.PREFS_KEY, JSON.stringify({
         mode: normalizeMode(state.prefs.mode),
+        conversationFontSize: normalizeConversationFontSize(state.prefs.conversationFontSize),
         readingWidthEnabled: normalizeBoolean(state.prefs.readingWidthEnabled, true),
         readingWidthPx: normalizeReadingWidth(state.prefs.readingWidthPx),
         formulaCopyEnabled: normalizeBoolean(state.prefs.formulaCopyEnabled, true)
@@ -119,6 +126,7 @@
   ns.state = {
     getDefaultPrefs: getDefaultPrefs,
     normalizeMode: normalizeMode,
+    normalizeConversationFontSize: normalizeConversationFontSize,
     normalizeReadingWidth: normalizeReadingWidth,
     normalizeBoolean: normalizeBoolean,
     DEFAULT_READING_WIDTH_PX: DEFAULT_READING_WIDTH_PX,

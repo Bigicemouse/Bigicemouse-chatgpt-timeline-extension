@@ -1,0 +1,33 @@
+ChatGPT Exporter integration
+
+Source: https://github.com/huhusmang/ChatGPT-Exporter
+Revision: c82dbb72dff97d8f13e48f77190af53577d5a400 (1.6.0)
+chatgpt-exporter.js is the unmodified chrome-extension/exporter.user.js from that revision.
+The upstream Tampermonkey.js header and package.json declare MIT licensing.
+Author: huhu. Upstream credits Alex Mercer, Hanashiro and WenDavid for the original core.
+Integration: loaded on demand from the Timeline Navigator popup; no reminder or updater service is included.
+
+JSZip 3.10.1: https://github.com/Stuk/jszip
+Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+Distributed under the MIT license option. Includes pako (MIT), copyright (c) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn.
+License notices are also preserved in jszip.min.js.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -122,7 +122,10 @@
   }
 
   function finalizeGroup(group, index) {
-    const userSummary = group.userTurn ? truncate(group.userTurn.text, 84) : '';
+    // Image placeholders belong to the original message/export, not the preview.
+    const userText = group.userTurn ? normalizeText(group.userTurn.text) : '';
+    const previewText = normalizeText(userText.replace(/\[Image:[^\]]*\]/gi, ' '));
+    const userSummary = group.userTurn ? truncate(previewText || (userText ? '图片' : ''), 84) : '';
     const assistantSummary = group.assistantTurns.length ? truncate(group.assistantTurns[0].text, 110) : '';
 
     group.index = index;
@@ -157,7 +160,7 @@
 
   function getTurnTextKey(turn) {
     if (!turn || !turn.text) return '';
-    return turn.role + ':' + normalizeText(turn.text).toLowerCase().slice(0, 220);
+    return turn.role + ':' + normalizeText(turn.text);
   }
 
   function mergeTurnsById(previousTurns, nextTurns) {
@@ -185,6 +188,8 @@
       if (!key) return;
       order += 1;
       byKey[key] = Object.assign({}, existing || {}, turn, {
+        sortIndex: existing && existing.source === 'api' && turn.source === 'dom' ? existing.sortIndex : turn.sortIndex,
+        source: existing && existing.source === 'api' ? 'api' : turn.source,
         cacheOrder: existing && typeof existing.cacheOrder === 'number' ? existing.cacheOrder : order,
         seenInCurrentDom: turn.seenInCurrentDom === true
       });

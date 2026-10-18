@@ -86,12 +86,20 @@
     }
     try {
       root.chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        if (root.chrome.runtime && root.chrome.runtime.lastError) {
+          if (callback) callback(null);
+          return;
+        }
         const tab = tabs && tabs[0];
         if (!tab || !tab.id) {
           if (callback) callback(null);
           return;
         }
         root.chrome.tabs.sendMessage(tab.id, message, function(response) {
+          if (root.chrome.runtime && root.chrome.runtime.lastError) {
+            if (callback) callback(null);
+            return;
+          }
           if (callback) callback(response || null);
         });
       });
@@ -102,6 +110,38 @@
 
   function initialize() {
     const controls = getControls();
+    const exportButton = root.document.getElementById('tl-open-exporter');
+    const exportStatus = root.document.getElementById('tl-export-status');
+    if (exportButton) {
+      exportButton.addEventListener('click', function() {
+        exportButton.disabled = true;
+        exportButton.textContent = '正在打开…';
+        exportStatus.hidden = true;
+        function fail(message) {
+          exportButton.disabled = false;
+          exportButton.textContent = '打开导出面板';
+          exportStatus.textContent = message;
+          exportStatus.hidden = false;
+        }
+        if (!root.chrome || !root.chrome.tabs || !root.chrome.runtime || !root.chrome.runtime.sendMessage) {
+          fail('请在浏览器扩展中打开，并先登录 ChatGPT。');
+          return;
+        }
+        root.chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+          if (root.chrome.runtime.lastError || !tabs || !tabs[0] || !tabs[0].id) {
+            fail('未找到当前标签页，请打开 ChatGPT 后重试。');
+            return;
+          }
+          root.chrome.runtime.sendMessage({ type: 'tl-open-exporter', tabId: tabs[0].id }, function(response) {
+            if (root.chrome.runtime.lastError || !response || !response.ok) {
+              fail(response && response.error || '无法打开导出面板，请重新加载扩展后重试。');
+              return;
+            }
+            root.close();
+          });
+        });
+      });
+    }
 
     if (controls.formulaCopyToggle) {
       controls.formulaCopyToggle.addEventListener('change', function() {
